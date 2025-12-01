@@ -14,7 +14,7 @@ const generateUser = () => {
 const myUser = generateUser();
 
 function App() {
-    const { myPeerId, connections, connectToPeer, sendFile, transfers } = useWebRTC(myUser);
+    const { myPeerId, connections, connectToPeer, sendFile, transfers, cancelTransfer } = useWebRTC(myUser);
     const [showQR, setShowQR] = useState(false);
     const [clipboardText, setClipboardText] = useState('');
     const [dragOver, setDragOver] = useState(null); // peerId
@@ -29,18 +29,16 @@ function App() {
         const peer = params.get('peer');
         if (peer && peer !== myPeerId) {
             setTargetId(peer);
-            // Auto connect if ID is present
-            // We need to wait for myPeerId to be ready, but connectToPeer handles null ref
-            // A better way is to trigger it when myPeerId is ready
         }
     }, [myPeerId]);
 
     useEffect(() => {
         // Update history when transfers complete
         Object.entries(transfers).forEach(([peerId, transfer]) => {
-            if (transfer.sent === transfer.size || transfer.received === transfer.size) {
+            if (transfer.status === 'completed' || transfer.status === 'cancelled') {
                 setHistory(prev => {
-                    if (prev.find(h => h.id === transfer.startTime)) return prev;
+                    // Avoid duplicates based on startTime
+                    if (prev.find(h => h.startTime === transfer.startTime)) return prev;
                     return [{ ...transfer, peerId, timestamp: new Date() }, ...prev];
                 });
             }
@@ -125,112 +123,179 @@ function App() {
         fileInputRef.current.click();
     };
 
+    const formatSize = (bytes) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
     const localUrl = `${window.location.origin}?peer=${myPeerId}`;
 
     return (
-        <div className="min-h-screen text-white p-8 relative font-sans">
+        <div className="min-h-screen text-white p-4 md:p-8 relative font-sans overflow-x-hidden">
             <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
 
             {/* Background Elements */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+            <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <motion.div
                     animate={{ scale: [1, 1.2, 1], rotate: [0, 90, 0] }}
                     transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                    className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-50"
+                    className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-40"
                 />
                 <motion.div
                     animate={{ scale: [1, 1.1, 1], rotate: [0, -60, 0] }}
                     transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-                    className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-50"
+                    className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-40"
                 />
             </div>
 
             {/* Header */}
-            <header className="flex flex-col md:flex-row justify-between items-center mb-12 glass-panel p-6 rounded-2xl gap-4">
-                <div className="flex items-center gap-4">
+            <header className="flex flex-col md:flex-row justify-between items-center mb-8 glass-panel p-6 rounded-3xl gap-6 shadow-2xl border border-white/10">
+                <div className="flex items-center gap-6 w-full md:w-auto">
                     <div className="relative">
-                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${myPeerId}`} alt="Me" className="w-16 h-16 rounded-full border-2 border-white/20" />
-                        <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-black" />
+                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${myPeerId}`} alt="Me" className="w-20 h-20 rounded-2xl border-2 border-white/20 bg-white/5 p-1" />
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-4 border-[#1a1a1a]" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-bold">{myUser.name}</h1>
-                        <p className="text-xs text-white/50 font-mono">ID: {myPeerId}</p>
+                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">{myUser.name}</h1>
+                        <div className="flex items-center gap-3 mt-1">
+                            <span className="text-sm text-white/50 font-mono bg-black/30 px-3 py-1 rounded-lg">ID: {myPeerId}</span>
+                            <button
+                                onClick={() => setShowQR(!showQR)}
+                                className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-xs"
+                            >
+                                Show QR
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <form onSubmit={handleConnect} className="flex gap-2 w-full md:w-auto">
+                <form onSubmit={handleConnect} className="flex gap-3 w-full md:w-auto bg-black/20 p-2 rounded-2xl border border-white/5">
                     <input
                         type="text"
-                        placeholder="Enter Peer ID to Connect"
-                        className="bg-black/20 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 md:w-64"
+                        placeholder="Enter 6-digit ID"
+                        className="bg-transparent border-none text-white placeholder-white/30 p-3 text-lg focus:outline-none flex-1 md:w-48 font-mono text-center"
                         value={targetId}
                         onChange={(e) => setTargetId(e.target.value)}
+                        maxLength={6}
                     />
-                    <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold text-sm transition-colors">
+                    <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-blue-500/25">
                         Connect
                     </button>
                 </form>
-
-                <button
-                    onClick={() => setShowQR(!showQR)}
-                    className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                    📱 Pair
-                </button>
             </header>
 
             {/* Main Grid */}
-            <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Connection Area */}
-                <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    {Object.values(connections).map(conn => (
-                        <motion.div
-                            key={conn.peer}
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            className={`glass-panel p-6 rounded-3xl relative overflow-hidden transition-all duration-300 ${dragOver === conn.peer ? 'ring-4 ring-blue-500 bg-white/10' : ''}`}
-                            onDragOver={(e) => handleDragOver(e, conn.peer)}
-                            onDragLeave={handleDragLeave}
-                            onDrop={(e) => handleDrop(e, conn.peer)}
-                        >
-                            <div className="flex flex-col items-center gap-4 z-10 relative">
-                                <div className="relative">
-                                    <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${conn.peer}`} alt="Peer" className="w-24 h-24 rounded-full bg-black/20" />
-                                    <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-black" />
-                                </div>
-                                <h2 className="text-xl font-bold truncate w-full text-center">{conn.peer}</h2>
-                                <p className="text-sm text-white/50">Connected</p>
-
-                                {/* Explicit Send Button */}
-                                <button
-                                    onClick={() => openFilePicker(conn.peer)}
-                                    className="mt-2 px-6 py-2 bg-white/10 hover:bg-white/20 rounded-full text-sm font-medium transition-colors"
-                                >
-                                    Send File
-                                </button>
-
-                                {/* Transfer Progress */}
-                                {transfers[conn.peer] && (
-                                    <div className="w-full mt-4 bg-black/20 rounded-full h-2 overflow-hidden relative">
-                                        <motion.div
-                                            className="absolute top-0 left-0 h-full bg-blue-500"
-                                            initial={{ width: 0 }}
-                                            animate={{ width: `${(transfers[conn.peer].type === 'send' ? transfers[conn.peer].sent : transfers[conn.peer].received) / transfers[conn.peer].size * 100}%` }}
-                                        />
-                                        <p className="text-xs text-center mt-2">
-                                            {transfers[conn.peer].type === 'send' ? 'Sending' : 'Receiving'} {transfers[conn.peer].fileName}
-                                        </p>
+                <div className="lg:col-span-2 grid grid-cols-1 gap-6">
+                    <AnimatePresence>
+                        {Object.values(connections).map(conn => (
+                            <motion.div
+                                key={conn.peer}
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                className={`glass-panel p-8 rounded-3xl relative overflow-hidden transition-all duration-300 ${dragOver === conn.peer ? 'ring-4 ring-blue-500 bg-white/10 scale-[1.02]' : ''}`}
+                                onDragOver={(e) => handleDragOver(e, conn.peer)}
+                                onDragLeave={handleDragLeave}
+                                onDrop={(e) => handleDrop(e, conn.peer)}
+                            >
+                                <div className="flex flex-col md:flex-row items-center gap-8 z-10 relative">
+                                    <div className="relative shrink-0">
+                                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${conn.peer}`} alt="Peer" className="w-24 h-24 rounded-2xl bg-black/20 p-2" />
+                                        <div className="absolute -bottom-2 -right-2 w-6 h-6 bg-green-500 rounded-full border-4 border-[#1a1a1a]" />
                                     </div>
-                                )}
-                            </div>
-                        </motion.div>
-                    ))}
+
+                                    <div className="flex-1 text-center md:text-left w-full">
+                                        <h2 className="text-2xl font-bold mb-1">Connected Peer</h2>
+                                        <p className="text-white/40 font-mono mb-6">ID: {conn.peer}</p>
+
+                                        <div className="flex flex-wrap justify-center md:justify-start gap-4">
+                                            <button
+                                                onClick={() => openFilePicker(conn.peer)}
+                                                className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold transition-all shadow-lg hover:shadow-blue-500/25 flex items-center gap-2"
+                                            >
+                                                <span>📤</span> Send File
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Active Transfer Card */}
+                                <AnimatePresence>
+                                    {transfers[conn.peer] && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="mt-8 bg-black/20 rounded-2xl p-6 border border-white/5"
+                                        >
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div>
+                                                    <h3 className="font-bold text-lg truncate max-w-[200px] md:max-w-md">{transfers[conn.peer].fileName}</h3>
+                                                    <p className="text-sm text-white/50 mt-1">
+                                                        {formatSize(transfers[conn.peer].size)} • {new Date(transfers[conn.peer].startTime).toLocaleTimeString()}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${transfers[conn.peer].status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                                                            transfers[conn.peer].status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                                                                'bg-blue-500/20 text-blue-400'
+                                                        }`}>
+                                                        {transfers[conn.peer].status.toUpperCase()}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Progress Bar */}
+                                            <div className="w-full bg-black/40 rounded-full h-3 overflow-hidden relative mb-4">
+                                                <motion.div
+                                                    className={`absolute top-0 left-0 h-full ${transfers[conn.peer].status === 'completed' ? 'bg-green-500' :
+                                                            transfers[conn.peer].status === 'cancelled' ? 'bg-red-500' :
+                                                                'bg-blue-500'
+                                                        }`}
+                                                    initial={{ width: 0 }}
+                                                    animate={{ width: `${(transfers[conn.peer].type === 'send' ? transfers[conn.peer].sent : transfers[conn.peer].received) / transfers[conn.peer].size * 100}%` }}
+                                                />
+                                            </div>
+
+                                            {/* Controls */}
+                                            <div className="flex justify-end gap-3">
+                                                {transfers[conn.peer].status === 'in-progress' && (
+                                                    <button
+                                                        onClick={() => cancelTransfer(conn.peer)}
+                                                        className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium transition-colors"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                )}
+                                                {transfers[conn.peer].status === 'completed' && transfers[conn.peer].type === 'receive' && transfers[conn.peer].blobUrl && (
+                                                    <a
+                                                        href={transfers[conn.peer].blobUrl}
+                                                        download={transfers[conn.peer].fileName}
+                                                        className="px-6 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm font-bold transition-colors shadow-lg hover:shadow-green-500/25"
+                                                    >
+                                                        Download
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </motion.div>
+                        ))}
+                    </AnimatePresence>
 
                     {Object.keys(connections).length === 0 && (
-                        <div className="col-span-full flex flex-col items-center justify-center p-12 text-white/30 border-2 border-dashed border-white/10 rounded-3xl">
-                            <p className="mb-4">No connections yet</p>
-                            <p className="text-sm">Share your ID or scan a QR code to connect</p>
+                        <div className="flex flex-col items-center justify-center p-16 text-white/30 border-2 border-dashed border-white/10 rounded-3xl bg-white/5">
+                            <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
+                                <span className="text-4xl">📡</span>
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">No Connections</h3>
+                            <p className="text-center max-w-xs">Share your 6-digit ID or scan the QR code to start transferring files instantly.</p>
                         </div>
                     )}
                 </div>
@@ -241,52 +306,45 @@ function App() {
                     <AnimatePresence>
                         {showQR && (
                             <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: 20 }}
-                                className="glass-panel p-6 rounded-3xl flex flex-col items-center"
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="glass-panel p-8 rounded-3xl flex flex-col items-center shadow-2xl border border-white/10"
                             >
-                                <h3 className="mb-4 font-bold">Scan to Connect</h3>
-                                <div className="bg-white p-4 rounded-xl">
+                                <h3 className="mb-6 font-bold text-lg">Scan to Connect</h3>
+                                <div className="bg-white p-4 rounded-2xl shadow-inner">
                                     <QRCodeSVG value={localUrl} size={200} />
                                 </div>
-                                <p className="mt-4 text-xs text-center break-all text-white/50">{localUrl}</p>
+                                <p className="mt-6 text-xs text-center break-all text-white/40 bg-black/20 p-3 rounded-lg w-full">{localUrl}</p>
                             </motion.div>
                         )}
                     </AnimatePresence>
 
-                    {/* Universal Clipboard */}
-                    <div className="glass-panel p-6 rounded-3xl">
-                        <h3 className="mb-4 font-bold flex items-center gap-2">
-                            <span>📋</span> Universal Clipboard
-                        </h3>
-                        <textarea
-                            className="w-full h-32 bg-black/20 rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                            placeholder="Paste text here to share..."
-                            value={clipboardText}
-                            onChange={(e) => setClipboardText(e.target.value)}
-                        />
-                        <button className="w-full mt-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl transition-colors font-medium">
-                            Broadcast to All
-                        </button>
-                    </div>
-
                     {/* History */}
-                    <div className="glass-panel p-6 rounded-3xl flex-1 overflow-hidden flex flex-col">
-                        <h3 className="mb-4 font-bold flex items-center gap-2">
-                            <span>clock</span> Transfer History
+                    <div className="glass-panel p-6 rounded-3xl flex-1 overflow-hidden flex flex-col min-h-[400px] border border-white/10">
+                        <h3 className="mb-6 font-bold flex items-center gap-3 text-lg">
+                            <span className="bg-blue-500/20 p-2 rounded-lg text-blue-400">clock</span>
+                            Transfer History
                         </h3>
-                        <div className="overflow-y-auto flex-1 pr-2 space-y-2">
-                            {history.length === 0 && <p className="text-white/30 text-sm text-center py-4">No transfers yet</p>}
+                        <div className="overflow-y-auto flex-1 pr-2 space-y-3 custom-scrollbar">
+                            {history.length === 0 && (
+                                <div className="h-full flex flex-col items-center justify-center text-white/30">
+                                    <p>No transfers yet</p>
+                                </div>
+                            )}
                             {history.map((item, i) => (
-                                <div key={i} className="bg-white/5 p-3 rounded-xl text-sm flex items-center justify-between">
-                                    <div className="truncate flex-1 mr-2">
-                                        <p className="font-medium truncate">{item.fileName}</p>
-                                        <p className="text-xs text-white/50">{item.type === 'send' ? 'Sent' : 'Received'}</p>
+                                <div key={i} className="bg-white/5 hover:bg-white/10 p-4 rounded-xl transition-colors border border-white/5">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <p className="font-medium truncate flex-1 mr-2" title={item.fileName}>{item.fileName}</p>
+                                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${item.type === 'send' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'
+                                            }`}>
+                                            {item.type === 'send' ? 'SENT' : 'RECEIVED'}
+                                        </span>
                                     </div>
-                                    <span className="text-xs text-white/30">
-                                        {(item.size / 1024 / 1024).toFixed(1)} MB
-                                    </span>
+                                    <div className="flex justify-between items-center text-xs text-white/40">
+                                        <span>{formatSize(item.size)}</span>
+                                        <span>{item.timestamp?.toLocaleTimeString()}</span>
+                                    </div>
                                 </div>
                             ))}
                         </div>
