@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import JSZip from 'jszip';
 import { useWebRTC } from './useWebRTC';
 
@@ -22,9 +23,21 @@ function App() {
         localStorage.setItem('localdrop_user', JSON.stringify(myUser));
     }, [myUser]);
 
-    const { myPeerId, connections, connectToPeer, sendFile, transfers, cancelTransfer, sendClipboard, clipboardHistory } = useWebRTC(myUser);
+    const {
+        myPeerId,
+        connections,
+        connectToPeer,
+        sendFile,
+        transfers,
+        cancelTransfer,
+        pauseTransfer,
+        resumeTransfer,
+        sendClipboard,
+        clipboardHistory
+    } = useWebRTC(myUser);
 
     const [showQR, setShowQR] = useState(false);
+    const [showScanner, setShowScanner] = useState(false);
     const [clipboardInput, setClipboardInput] = useState('');
     const [dragOver, setDragOver] = useState(null); // peerId
     const [targetId, setTargetId] = useState('');
@@ -42,10 +55,41 @@ function App() {
     const fileInputRef = useRef(null);
     const [selectedPeer, setSelectedPeer] = useState(null);
 
+    // QR Scanner Logic
+    useEffect(() => {
+        if (showScanner) {
+            const scanner = new Html5QrcodeScanner(
+                "reader",
+                { fps: 10, qrbox: { width: 250, height: 250 } },
+              /* verbose= */ false
+            );
+
+            scanner.render((decodedText) => {
+                // Parse URL to get peer ID
+                try {
+                    const url = new URL(decodedText);
+                    const peer = url.searchParams.get('peer');
+                    if (peer && peer !== myPeerId) {
+                        connectToPeer(peer);
+                        scanner.clear();
+                        setShowScanner(false);
+                    }
+                } catch (e) {
+                    console.error('Invalid QR Code', e);
+                }
+            }, (error) => {
+                // console.warn(error);
+            });
+
+            return () => {
+                scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+            };
+        }
+    }, [showScanner, myPeerId]);
+
     // Sound Effects
     const playSound = (type) => {
-        // Simple base64 sounds could be added here, or just visual cues
-        // For now, we'll rely on visual cues as requested assets aren't available
+        // Placeholder
     };
 
     useEffect(() => {
@@ -211,19 +255,28 @@ function App() {
                     </div>
                 </div>
 
-                <form onSubmit={handleConnect} className="flex gap-3 w-full md:w-auto bg-black/20 p-2 rounded-2xl border border-white/5">
-                    <input
-                        type="text"
-                        placeholder="Enter 6-digit ID"
-                        className="bg-transparent border-none text-white placeholder-white/30 p-3 text-lg focus:outline-none flex-1 md:w-48 font-mono text-center"
-                        value={targetId}
-                        onChange={(e) => setTargetId(e.target.value)}
-                        maxLength={6}
-                    />
-                    <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-6 md:px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-blue-500/25">
-                        Connect
+                <div className="flex gap-3 w-full md:w-auto items-center">
+                    <form onSubmit={handleConnect} className="flex gap-3 w-full md:w-auto bg-black/20 p-2 rounded-2xl border border-white/5 flex-1">
+                        <input
+                            type="text"
+                            placeholder="Enter 6-digit ID"
+                            className="bg-transparent border-none text-white placeholder-white/30 p-3 text-lg focus:outline-none flex-1 md:w-48 font-mono text-center"
+                            value={targetId}
+                            onChange={(e) => setTargetId(e.target.value)}
+                            maxLength={6}
+                        />
+                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-6 md:px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-blue-500/25">
+                            Connect
+                        </button>
+                    </form>
+                    <button
+                        onClick={() => setShowScanner(!showScanner)}
+                        className="p-4 rounded-2xl bg-white/10 hover:bg-white/20 transition-colors"
+                        title="Scan QR Code"
+                    >
+                        📷
                     </button>
-                </form>
+                </div>
             </header>
 
             {/* Main Grid */}
@@ -285,7 +338,8 @@ function App() {
                                                 <div className="text-right shrink-0 ml-2">
                                                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${transfers[conn.peer].status === 'completed' ? 'bg-green-500/20 text-green-400' :
                                                             transfers[conn.peer].status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
-                                                                'bg-blue-500/20 text-blue-400'
+                                                                transfers[conn.peer].status === 'paused' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                                    'bg-blue-500/20 text-blue-400'
                                                         }`}>
                                                         {transfers[conn.peer].status.toUpperCase()}
                                                     </span>
@@ -297,7 +351,8 @@ function App() {
                                                 <motion.div
                                                     className={`absolute top-0 left-0 h-full ${transfers[conn.peer].status === 'completed' ? 'bg-green-500' :
                                                             transfers[conn.peer].status === 'cancelled' ? 'bg-red-500' :
-                                                                'bg-blue-500'
+                                                                transfers[conn.peer].status === 'paused' ? 'bg-yellow-500' :
+                                                                    'bg-blue-500'
                                                         }`}
                                                     initial={{ width: 0 }}
                                                     animate={{ width: `${(transfers[conn.peer].type === 'send' ? transfers[conn.peer].sent : transfers[conn.peer].received) / transfers[conn.peer].size * 100}%` }}
@@ -307,12 +362,36 @@ function App() {
                                             {/* Controls */}
                                             <div className="flex justify-end gap-3">
                                                 {transfers[conn.peer].status === 'in-progress' && (
-                                                    <button
-                                                        onClick={() => cancelTransfer(conn.peer)}
-                                                        className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium transition-colors"
-                                                    >
-                                                        Cancel
-                                                    </button>
+                                                    <>
+                                                        <button
+                                                            onClick={() => pauseTransfer(conn.peer)}
+                                                            className="px-4 py-2 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 rounded-lg text-sm font-medium transition-colors"
+                                                        >
+                                                            Pause
+                                                        </button>
+                                                        <button
+                                                            onClick={() => cancelTransfer(conn.peer)}
+                                                            className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium transition-colors"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {transfers[conn.peer].status === 'paused' && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => resumeTransfer(conn.peer)}
+                                                            className="px-4 py-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg text-sm font-medium transition-colors"
+                                                        >
+                                                            Resume
+                                                        </button>
+                                                        <button
+                                                            onClick={() => cancelTransfer(conn.peer)}
+                                                            className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium transition-colors"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </>
                                                 )}
                                                 {transfers[conn.peer].status === 'completed' && transfers[conn.peer].type === 'receive' && transfers[conn.peer].blobUrl && (
                                                     <a
@@ -382,7 +461,7 @@ function App() {
                         </div>
                     </div>
 
-                    {/* QR Code */}
+                    {/* QR Code & Scanner */}
                     <AnimatePresence>
                         {showQR && (
                             <motion.div
@@ -396,6 +475,23 @@ function App() {
                                     <QRCodeSVG value={localUrl} size={200} />
                                 </div>
                                 <p className="mt-6 text-xs text-center break-all text-white/40 bg-black/20 p-3 rounded-lg w-full">{localUrl}</p>
+                            </motion.div>
+                        )}
+                        {showScanner && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="glass-panel p-4 rounded-3xl flex flex-col items-center shadow-2xl border border-white/10"
+                            >
+                                <h3 className="mb-4 font-bold text-lg">Point Camera at QR Code</h3>
+                                <div id="reader" className="w-full max-w-xs overflow-hidden rounded-xl"></div>
+                                <button
+                                    onClick={() => setShowScanner(false)}
+                                    className="mt-4 text-sm text-red-400 hover:text-red-300"
+                                >
+                                    Close Scanner
+                                </button>
                             </motion.div>
                         )}
                     </AnimatePresence>

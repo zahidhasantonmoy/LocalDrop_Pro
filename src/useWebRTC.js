@@ -9,45 +9,91 @@ const generateShortId = () => {
 };
 
 export const useWebRTC = (myUserData) => {
-    const [myPeerId, setMyPeerId] = useState('');
+    // Persistence: Load ID from localStorage or generate new
+    const [myPeerId, setMyPeerId] = useState(() => {
+        return localStorage.getItem('localdrop_peer_id') || '';
+    });
+
     const [connections, setConnections] = useState({}); // peerId -> DataConnection
     const [transfers, setTransfers] = useState({}); // peerId -> transfer info
-    const [clipboardHistory, setClipboardHistory] = useState([]); // Array of { text, sender, timestamp }
+    const [clipboardHistory, setClipboardHistory] = useState([]);
 
     const peerRef = useRef(null);
     const chunksRef = useRef({}); // peerId -> array of chunks
     const incomingMetaRef = useRef({}); // peerId -> metadata
-    const activeTransfersRef = useRef({}); // peerId -> boolean (true if active)
+    const activeTransfersRef = useRef({}); // peerId -> { active: bool, paused: bool, offset: number, file: File (sender only) }
     const lastChunkTimeRef = useRef({}); // peerId -> timestamp
 
+    // Persistence: Save ID
     useEffect(() => {
-        // Initialize PeerJS with a custom 6-digit ID
-        const id = generateShortId();
-        const peer = new Peer(id);
+        if (myPeerId) {
+            localStorage.setItem('localdrop_peer_id', myPeerId);
+        }
+    }, [myPeerId]);
 
-        peer.on('open', (id) => {
-            console.log('My Peer ID is: ' + id);
-            setMyPeerId(id);
-        });
+    // Persistence: Auto-reconnect to known peers
+    useEffect(() => {
+        const savedPeers = JSON.parse(localStorage.getItem('localdrop_known_peers') || '[]');
+        if (peerRef.current && !peerRef.current.destroyed) {
+            savedPeers.forEach(targetId => {
+                if (targetId !== myPeerId && !connections[targetId]) {
+                    console.log('Auto-reconnecting to:', targetId);
+                    connectToPeer(targetId);
+                }
+            });
+        }
+    }, [myPeerId]); // Retry when myPeerId is set/ready
 
-        peer.on('connection', (conn) => {
-            console.log('Incoming connection from:', conn.peer);
-            setupConnection(conn);
-        });
+    useEffect(() => {
+        // Initialize PeerJS
+        // If we have a stored ID, try to use it. If taken/error, we might need to generate new.
+        const startPeer = (idToUse) => {
+            const id = idToUse || generateShortId();
+            const peer = new Peer(id);
 
-        peer.on('error', (err) => {
-            console.error('PeerJS error:', err);
-        });
+            peer.on('open', (id) => {
+                console.log('My Peer ID is: ' + id);
+                setMyPeerId(id);
+            });
 
-        peerRef.current = peer;
+            peer.on('connection', (conn) => {
+                console.log('Incoming connection from:', conn.peer);
+                setupConnection(conn);
+            });
+
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                if (err.type === 'unavailable-id') {
+                    // ID taken, generate new one and retry
+                    console.log('ID taken, generating new one...');
+                    peer.destroy();
+                    startPeer(generateShortId());
+                }
+            });
+
+            peerRef.current = peer;
+        };
+
+        startPeer(myPeerId);
 
         return () => {
-            peer.destroy();
+            if (peerRef.current) peerRef.current.destroy();
         };
     }, []);
 
+    // Update known peers in localStorage
+    useEffect(() => {
+        const peerIds = Object.keys(connections);
+        if (peerIds.length > 0) {
+            localStorage.setItem('localdrop_known_peers', JSON.stringify(peerIds));
+        }
+    }, [connections]);
+
     const connectToPeer = (targetPeerId) => {
-        if (!peerRef.current) return;
+        if (!peerRef.current || targetPeerId === myPeerId) return;
+        // Check if already connected
+        if (connections[targetPeerId]) return;
+
         console.log('Connecting to:', targetPeerId);
         const conn = peerRef.current.connect(targetPeerId);
         setupConnection(conn);
@@ -79,13 +125,41 @@ export const useWebRTC = (myUserData) => {
     };
 
     const handleData = (peerId, data) => {
-        // Handle Control Messages (Cancel)
-        if (data && data.type === 'cancel') {
-            activeTransfersRef.current[peerId] = false;
-            setTransfers(prev => ({
-                ...prev,
-                [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
-            }));
+        // Handle Control Messages
+        if (data && data.type === 'control') {
+            if (data.action === 'cancel') {
+                // Received cancel signal
+                if (activeTransfersRef.current[peerId]) {
+                    activeTransfersRef.current[peerId].active = false;
+                }
+                setTransfers(prev => ({
+                    ...prev,
+                    [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
+                }));
+            } else if (data.action === 'pause') {
+                // Received pause signal
+                if (activeTransfersRef.current[peerId]) {
+                    activeTransfersRef.current[peerId].paused = true;
+                }
+                setTransfers(prev => ({
+                    ...prev,
+                    [peerId]: { ...prev[peerId], status: 'paused', speed: 0 }
+                }));
+            } else if (data.action === 'resume') {
+                // Received resume signal (usually from receiver telling sender to restart from offset)
+                if (activeTransfersRef.current[peerId] && activeTransfersRef.current[peerId].file) {
+                    // I am sender, resume sending
+                    activeTransfersRef.current[peerId].paused = false;
+                    activeTransfersRef.current[peerId].active = true;
+                    // Restart reading loop from requested offset
+                    sendChunkLoop(peerId, activeTransfersRef.current[peerId].file, data.offset);
+
+                    setTransfers(prev => ({
+                        ...prev,
+                        [peerId]: { ...prev[peerId], status: 'in-progress' }
+                    }));
+                }
+            }
             return;
         }
 
@@ -95,17 +169,11 @@ export const useWebRTC = (myUserData) => {
             return;
         }
 
-        // Handle User Info
-        if (data && data.type === 'user-info') {
-            // Store user info if needed
-            return;
-        }
-
         // Handle File Transfer
         if (data && data.type === 'file-start') {
             chunksRef.current[peerId] = [];
             incomingMetaRef.current[peerId] = data;
-            activeTransfersRef.current[peerId] = true;
+            activeTransfersRef.current[peerId] = { active: true, paused: false, offset: 0 };
             lastChunkTimeRef.current[peerId] = Date.now();
 
             setTransfers(prev => ({
@@ -121,41 +189,40 @@ export const useWebRTC = (myUserData) => {
                 }
             }));
         } else if (data && data.type === 'file-end') {
-            if (!activeTransfersRef.current[peerId]) return; // Was cancelled
+            if (!activeTransfersRef.current[peerId]?.active) return;
 
             const meta = incomingMetaRef.current[peerId];
             const blob = new Blob(chunksRef.current[peerId], { type: meta.mimeType });
             const url = URL.createObjectURL(blob);
 
-            // NO AUTO DOWNLOAD - Just update state
             setTransfers(prev => ({
                 ...prev,
                 [peerId]: {
                     ...prev[peerId],
                     status: 'completed',
                     blobUrl: url,
-                    speed: 0
+                    speed: 0,
+                    received: meta.size // Ensure 100%
                 }
             }));
 
             chunksRef.current[peerId] = [];
-            activeTransfersRef.current[peerId] = false;
+            activeTransfersRef.current[peerId] = null;
 
         } else if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
-            if (!activeTransfersRef.current[peerId]) return; // Was cancelled
+            if (!activeTransfersRef.current[peerId]?.active || activeTransfersRef.current[peerId]?.paused) return;
 
             // Binary chunk
             if (!chunksRef.current[peerId]) chunksRef.current[peerId] = [];
             chunksRef.current[peerId].push(data);
 
+            const currentRef = activeTransfersRef.current[peerId];
+            currentRef.offset += data.byteLength;
+
             // Calculate Speed
             const now = Date.now();
             const timeDiff = now - lastChunkTimeRef.current[peerId];
-            let speed = 0;
-            if (timeDiff > 500) { // Update speed every 500ms
-                // This is a rough estimate, ideally we'd track bytes over time
-                // For simplicity, we'll just leave it as 0 or implement a better moving average later
-                // Actually, let's just not update speed on every chunk to avoid re-renders
+            if (timeDiff > 1000) { // Update speed every 1s
                 lastChunkTimeRef.current[peerId] = now;
             }
 
@@ -163,7 +230,6 @@ export const useWebRTC = (myUserData) => {
                 const current = prev[peerId];
                 if (!current) return prev;
 
-                // Simple speed calc: bytes / (now - startTime) * 1000
                 const elapsed = (now - current.startTime) / 1000;
                 const newReceived = current.received + data.byteLength;
                 const currentSpeed = elapsed > 0 ? newReceived / elapsed : 0;
@@ -184,7 +250,8 @@ export const useWebRTC = (myUserData) => {
         const conn = connections[peerId];
         if (!conn) return;
 
-        activeTransfersRef.current[peerId] = true;
+        activeTransfersRef.current[peerId] = { active: true, paused: false, offset: 0, file: file };
+
         setTransfers(prev => ({
             ...prev,
             [peerId]: {
@@ -206,13 +273,22 @@ export const useWebRTC = (myUserData) => {
             mimeType: file.type
         });
 
+        sendChunkLoop(peerId, file, 0);
+    };
+
+    const sendChunkLoop = (peerId, file, startOffset) => {
+        const conn = connections[peerId];
+        let offset = startOffset;
         const reader = new FileReader();
-        let offset = 0;
 
         const readSlice = () => {
-            if (!activeTransfersRef.current[peerId]) {
-                // Cancelled
-                conn.send({ type: 'cancel' });
+            const state = activeTransfersRef.current[peerId];
+            if (!state || !state.active) {
+                // Cancelled or finished
+                return;
+            }
+            if (state.paused) {
+                // Paused, stop loop
                 return;
             }
 
@@ -221,16 +297,17 @@ export const useWebRTC = (myUserData) => {
         };
 
         reader.onload = (e) => {
-            if (!conn.open || !activeTransfersRef.current[peerId]) return;
+            const state = activeTransfersRef.current[peerId];
+            if (!conn.open || !state || !state.active || state.paused) return;
 
             conn.send(e.target.result);
             offset += CHUNK_SIZE;
+            state.offset = offset;
 
             setTransfers(prev => {
                 const current = prev[peerId];
                 if (!current) return prev;
 
-                // Calculate Speed
                 const now = Date.now();
                 const elapsed = (now - current.startTime) / 1000;
                 const currentSpeed = elapsed > 0 ? offset / elapsed : 0;
@@ -246,14 +323,15 @@ export const useWebRTC = (myUserData) => {
             });
 
             if (offset < file.size) {
-                setTimeout(readSlice, 10);
+                // Use setTimeout to avoid blocking UI and allow pause checks
+                setTimeout(readSlice, 5);
             } else {
                 conn.send({ type: 'file-end' });
                 setTransfers(prev => ({
                     ...prev,
                     [peerId]: { ...prev[peerId], status: 'completed', speed: 0 }
                 }));
-                activeTransfersRef.current[peerId] = false;
+                activeTransfersRef.current[peerId] = null;
             }
         };
 
@@ -261,14 +339,61 @@ export const useWebRTC = (myUserData) => {
     };
 
     const cancelTransfer = (peerId) => {
-        activeTransfersRef.current[peerId] = false;
+        if (activeTransfersRef.current[peerId]) {
+            activeTransfersRef.current[peerId].active = false;
+        }
         const conn = connections[peerId];
         if (conn) {
-            conn.send({ type: 'cancel' });
+            conn.send({ type: 'control', action: 'cancel' });
         }
         setTransfers(prev => ({
             ...prev,
             [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
+        }));
+    };
+
+    const pauseTransfer = (peerId) => {
+        // Only sender can pause effectively in this simple model, 
+        // or receiver sends pause request.
+        // Let's allow both to pause.
+        if (activeTransfersRef.current[peerId]) {
+            activeTransfersRef.current[peerId].paused = true;
+        }
+
+        const conn = connections[peerId];
+        if (conn) {
+            conn.send({ type: 'control', action: 'pause' });
+        }
+
+        setTransfers(prev => ({
+            ...prev,
+            [peerId]: { ...prev[peerId], status: 'paused', speed: 0 }
+        }));
+    };
+
+    const resumeTransfer = (peerId) => {
+        // If I am sender, I just resume.
+        // If I am receiver, I ask sender to resume from my received amount.
+        const transfer = transfers[peerId];
+        const conn = connections[peerId];
+
+        if (transfer.type === 'send') {
+            if (activeTransfersRef.current[peerId]) {
+                activeTransfersRef.current[peerId].paused = false;
+                activeTransfersRef.current[peerId].active = true;
+                // Resume loop
+                sendChunkLoop(peerId, activeTransfersRef.current[peerId].file, activeTransfersRef.current[peerId].offset);
+            }
+        } else {
+            // Receiver asking for resume
+            if (conn) {
+                conn.send({ type: 'control', action: 'resume', offset: transfer.received });
+            }
+        }
+
+        setTransfers(prev => ({
+            ...prev,
+            [peerId]: { ...prev[peerId], status: 'in-progress' }
         }));
     };
 
@@ -278,5 +403,16 @@ export const useWebRTC = (myUserData) => {
         });
     };
 
-    return { myPeerId, connections, connectToPeer, sendFile, transfers, cancelTransfer, sendClipboard, clipboardHistory };
+    return {
+        myPeerId,
+        connections,
+        connectToPeer,
+        sendFile,
+        transfers,
+        cancelTransfer,
+        pauseTransfer,
+        resumeTransfer,
+        sendClipboard,
+        clipboardHistory
+    };
 };
