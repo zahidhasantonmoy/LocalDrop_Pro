@@ -1,149 +1,100 @@
 import { useEffect, useRef, useState } from 'react';
-import io from 'socket.io-client';
-import SimplePeer from 'simple-peer';
+import Peer from 'peerjs';
 
 const CHUNK_SIZE = 64 * 1024; // 64KB
 
 export const useWebRTC = (myUserData) => {
-    const [peers, setPeers] = useState({}); // socketId -> { peer, connected }
-    const [users, setUsers] = useState([]); // List of all users in room
-    const [transfers, setTransfers] = useState({}); // peerId -> { type: 'send'|'receive', fileName, progress, speed, id }
+    const [myPeerId, setMyPeerId] = useState('');
+    const [connections, setConnections] = useState({}); // peerId -> DataConnection
+    const [transfers, setTransfers] = useState({}); // peerId -> transfer info
 
-    const socketRef = useRef();
-    const peersRef = useRef({}); // socketId -> peer instance
+    const peerRef = useRef(null);
     const chunksRef = useRef({}); // peerId -> array of chunks
     const incomingMetaRef = useRef({}); // peerId -> metadata
 
     useEffect(() => {
-        // Connect to signaling server
-        // For Vercel, we use the same origin but point to the API route
-        const isVercel = import.meta.env.PROD;
-        const url = isVercel ? window.location.origin : (import.meta.env.VITE_SIGNALING_URL || '/');
-        const path = isVercel ? '/api/socket' : '/socket.io';
+        // Initialize PeerJS
+        const peer = new Peer();
 
-        socketRef.current = io(url, {
-            path: path,
-            addTrailingSlash: false,
-            secure: true,
-            rejectUnauthorized: false
+        peer.on('open', (id) => {
+            console.log('My Peer ID is: ' + id);
+            setMyPeerId(id);
         });
 
-        socketRef.current.on('connect', () => {
-            console.log('Connected to signaling server');
-            // Wait for explicit join call
-        });
-
-        socketRef.current.on('users-list', (existingUsers) => {
-            setUsers(existingUsers);
-            // Initiate connections to all existing users
-            existingUsers.forEach(user => {
-                createPeer(user.id, socketRef.current.id, true);
-            });
-        });
-
-        socketRef.current.on('user-joined', (newUser) => {
-            setUsers(prev => {
-                if (prev.find(u => u.id === newUser.id)) return prev;
-                return [...prev, newUser];
-            });
-        });
-
-        socketRef.current.on('user-left', (id) => {
-            setUsers(prev => prev.filter(u => u.id !== id));
-            if (peersRef.current[id]) {
-                peersRef.current[id].destroy();
-                delete peersRef.current[id];
-            }
-            setPeers(prev => {
-                const newPeers = { ...prev };
-                delete newPeers[id];
-                return newPeers;
-            });
-        });
-
-        socketRef.current.on('signal', (data) => {
-            const { from, signal } = data;
-            if (peersRef.current[from]) {
-                peersRef.current[from].signal(signal);
-            } else {
-                const peer = createPeer(from, socketRef.current.id, false);
-                peer.signal(signal);
-            }
-        });
-
-        return () => {
-            socketRef.current.disconnect();
-            Object.values(peersRef.current).forEach(peer => peer.destroy());
-        };
-    }, []);
-
-    const createPeer = (targetId, myId, initiator) => {
-        const peer = new SimplePeer({
-            initiator,
-            trickle: false
-        });
-
-        peer.on('signal', (signal) => {
-            socketRef.current.emit('signal', {
-                to: targetId,
-                signal
-            });
-        });
-
-        peer.on('connect', () => {
-            console.log('Peer connected:', targetId);
-            setPeers(prev => ({ ...prev, [targetId]: { connected: true } }));
-        });
-
-        peer.on('data', (data) => {
-            handleData(targetId, data);
+        peer.on('connection', (conn) => {
+            console.log('Incoming connection from:', conn.peer);
+            setupConnection(conn);
         });
 
         peer.on('error', (err) => {
-            console.error('Peer error:', err);
+            console.error('PeerJS error:', err);
         });
 
-        peer.on('close', () => {
-            console.log('Peer closed:', targetId);
-            setPeers(prev => {
-                const newPeers = { ...prev };
-                delete newPeers[targetId];
-                return newPeers;
+        peerRef.current = peer;
+
+        return () => {
+            peer.destroy();
+        };
+    }, []);
+
+    const connectToPeer = (targetPeerId) => {
+        if (!peerRef.current) return;
+        console.log('Connecting to:', targetPeerId);
+        const conn = peerRef.current.connect(targetPeerId);
+        setupConnection(conn);
+    };
+
+    const setupConnection = (conn) => {
+        conn.on('open', () => {
+            console.log('Connection opened:', conn.peer);
+            setConnections(prev => ({ ...prev, [conn.peer]: conn }));
+
+            // Send our user data immediately
+            conn.send({ type: 'user-info', user: myUserData });
+        });
+
+        conn.on('data', (data) => {
+            handleData(conn.peer, data);
+        });
+
+        conn.on('close', () => {
+            console.log('Connection closed:', conn.peer);
+            setConnections(prev => {
+                const newConns = { ...prev };
+                delete newConns[conn.peer];
+                return newConns;
             });
         });
 
-        peersRef.current[targetId] = peer;
-        setPeers(prev => ({ ...prev, [targetId]: { connected: false } }));
-        return peer;
+        conn.on('error', (err) => {
+            console.error('Connection error:', err);
+        });
     };
 
     const handleData = (peerId, data) => {
-        // Check if data is JSON (metadata) or binary (chunk)
-        // Simple way: try to parse as string if it looks like JSON
-        let message;
-        try {
-            const text = new TextDecoder().decode(data);
-            if (text.startsWith('{')) {
-                message = JSON.parse(text);
-            }
-        } catch (e) {
-            // Not JSON, likely binary
+        // Handle User Info
+        if (data && data.type === 'user-info') {
+            // We can store this if we want to show names instead of IDs
+            // For now, we just log it
+            console.log('Received user info:', data.user);
+            return;
         }
 
-        if (message && message.type === 'file-start') {
+        // Handle File Transfer
+        if (data && data.type === 'file-start') {
             chunksRef.current[peerId] = [];
-            incomingMetaRef.current[peerId] = message;
+            incomingMetaRef.current[peerId] = data;
             setTransfers(prev => ({
                 ...prev,
                 [peerId]: {
                     type: 'receive',
-                    fileName: message.name,
-                    size: message.size,
+                    fileName: data.name,
+                    size: data.size,
                     received: 0,
                     startTime: Date.now()
                 }
             }));
-        } else if (message && message.type === 'file-end') {
+        } else if (data && data.type === 'file-end') {
             const meta = incomingMetaRef.current[peerId];
             const blob = new Blob(chunksRef.current[peerId], { type: meta.mimeType });
             const url = URL.createObjectURL(blob);
@@ -160,7 +111,7 @@ export const useWebRTC = (myUserData) => {
                 delete newTransfers[peerId];
                 return newTransfers;
             });
-        } else {
+        } else if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
             // Binary chunk
             if (!chunksRef.current[peerId]) chunksRef.current[peerId] = [];
             chunksRef.current[peerId].push(data);
@@ -177,8 +128,8 @@ export const useWebRTC = (myUserData) => {
     };
 
     const sendFile = (peerId, file) => {
-        const peer = peersRef.current[peerId];
-        if (!peer) return;
+        const conn = connections[peerId];
+        if (!conn) return;
 
         setTransfers(prev => ({
             ...prev,
@@ -192,12 +143,12 @@ export const useWebRTC = (myUserData) => {
         }));
 
         // Send metadata
-        peer.send(JSON.stringify({
+        conn.send({
             type: 'file-start',
             name: file.name,
             size: file.size,
             mimeType: file.type
-        }));
+        });
 
         const reader = new FileReader();
         let offset = 0;
@@ -208,8 +159,8 @@ export const useWebRTC = (myUserData) => {
         };
 
         reader.onload = (e) => {
-            if (peer.destroyed) return;
-            peer.send(e.target.result);
+            if (!conn.open) return;
+            conn.send(e.target.result);
             offset += CHUNK_SIZE;
 
             setTransfers(prev => {
@@ -222,10 +173,10 @@ export const useWebRTC = (myUserData) => {
             });
 
             if (offset < file.size) {
-                // Small delay to prevent blocking UI
-                setTimeout(readSlice, 0);
+                // Small delay to prevent blocking UI and buffer overflow
+                setTimeout(readSlice, 10);
             } else {
-                peer.send(JSON.stringify({ type: 'file-end' }));
+                conn.send({ type: 'file-end' });
                 setTransfers(prev => {
                     const newTransfers = { ...prev };
                     delete newTransfers[peerId];
@@ -237,11 +188,5 @@ export const useWebRTC = (myUserData) => {
         readSlice();
     };
 
-    const joinRoom = (roomId) => {
-        if (socketRef.current && socketRef.current.connected) {
-            socketRef.current.emit('join', { userData: myUserData, roomId });
-        }
-    };
-
-    return { users, peers, sendFile, transfers, joinRoom };
+    return { myPeerId, connections, connectToPeer, sendFile, transfers };
 };

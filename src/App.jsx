@@ -4,35 +4,36 @@ import { QRCodeSVG } from 'qrcode.react';
 import JSZip from 'jszip';
 import { useWebRTC } from './useWebRTC';
 
-// Generate a random user ID and name
+// Generate a random user name
 const generateUser = () => {
     const names = ['Nebula', 'Quasar', 'Pulsar', 'Nova', 'Zenith', 'Cosmos', 'Orbit'];
     const name = names[Math.floor(Math.random() * names.length)];
-    const id = Math.random().toString(36).substr(2, 9);
-    return { name, id, avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${id}` };
+    return { name };
 };
 
 const myUser = generateUser();
 
 function App() {
-    const { users, peers, sendFile, transfers, joinRoom } = useWebRTC(myUser);
+    const { myPeerId, connections, connectToPeer, sendFile, transfers } = useWebRTC(myUser);
     const [showQR, setShowQR] = useState(false);
     const [clipboardText, setClipboardText] = useState('');
     const [dragOver, setDragOver] = useState(null); // peerId
-    const [connected, setConnected] = useState(false);
-    const [roomId, setRoomId] = useState('');
+    const [targetId, setTargetId] = useState('');
     const [history, setHistory] = useState([]); // Array of transfer objects
     const fileInputRef = useRef(null);
     const [selectedPeer, setSelectedPeer] = useState(null);
 
     useEffect(() => {
-        // Check URL for room ID
+        // Check URL for peer ID to connect to
         const params = new URLSearchParams(window.location.search);
-        const room = params.get('room');
-        if (room) {
-            setRoomId(room);
+        const peer = params.get('peer');
+        if (peer && peer !== myPeerId) {
+            setTargetId(peer);
+            // Auto connect if ID is present
+            // We need to wait for myPeerId to be ready, but connectToPeer handles null ref
+            // A better way is to trigger it when myPeerId is ready
         }
-    }, []);
+    }, [myPeerId]);
 
     useEffect(() => {
         // Update history when transfers complete
@@ -46,11 +47,11 @@ function App() {
         });
     }, [transfers]);
 
-    const handleJoin = (e) => {
+    const handleConnect = (e) => {
         e.preventDefault();
-        if (roomId) {
-            joinRoom(roomId);
-            setConnected(true);
+        if (targetId) {
+            connectToPeer(targetId);
+            setTargetId('');
         }
     };
 
@@ -124,31 +125,7 @@ function App() {
         fileInputRef.current.click();
     };
 
-    const localUrl = `${window.location.origin}?room=${roomId}`;
-
-    if (!connected) {
-        return (
-            <div className="min-h-screen flex items-center justify-center p-4">
-                <div className="glass-panel p-8 rounded-3xl w-full max-w-md text-center">
-                    <h1 className="text-3xl font-bold mb-2">LocalDrop Pro</h1>
-                    <p className="text-white/50 mb-8">Enter a Room PIN to join</p>
-                    <form onSubmit={handleJoin} className="flex flex-col gap-4">
-                        <input
-                            type="text"
-                            placeholder="Room PIN (e.g. 1234)"
-                            className="bg-black/20 border border-white/10 rounded-xl p-4 text-center text-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            value={roomId}
-                            onChange={(e) => setRoomId(e.target.value)}
-                            required
-                        />
-                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-lg transition-colors">
-                            Join Room
-                        </button>
-                    </form>
-                </div>
-            </div>
-        );
-    }
+    const localUrl = `${window.location.origin}?peer=${myPeerId}`;
 
     return (
         <div className="min-h-screen text-white p-8 relative font-sans">
@@ -169,74 +146,80 @@ function App() {
             </div>
 
             {/* Header */}
-            <header className="flex justify-between items-center mb-12 glass-panel p-4 rounded-2xl">
+            <header className="flex flex-col md:flex-row justify-between items-center mb-12 glass-panel p-6 rounded-2xl gap-4">
                 <div className="flex items-center gap-4">
                     <div className="relative">
-                        <img src={myUser.avatar} alt="Me" className="w-12 h-12 rounded-full border-2 border-white/20" />
-                        <motion.div
-                            animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
-                            transition={{ duration: 2, repeat: Infinity }}
-                            className="absolute inset-0 rounded-full border-2 border-blue-400"
-                        />
+                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${myPeerId}`} alt="Me" className="w-16 h-16 rounded-full border-2 border-white/20" />
+                        <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-black" />
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold">{myUser.name}</h1>
-                        <p className="text-xs text-white/50">Room: {roomId}</p>
+                        <h1 className="text-2xl font-bold">{myUser.name}</h1>
+                        <p className="text-xs text-white/50 font-mono">ID: {myPeerId}</p>
                     </div>
                 </div>
-                <div className="flex gap-4">
-                    <button
-                        onClick={() => setShowQR(!showQR)}
-                        className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-                    >
-                        📱 Pair Mobile
+
+                <form onSubmit={handleConnect} className="flex gap-2 w-full md:w-auto">
+                    <input
+                        type="text"
+                        placeholder="Enter Peer ID to Connect"
+                        className="bg-black/20 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 md:w-64"
+                        value={targetId}
+                        onChange={(e) => setTargetId(e.target.value)}
+                    />
+                    <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold text-sm transition-colors">
+                        Connect
                     </button>
-                </div>
+                </form>
+
+                <button
+                    onClick={() => setShowQR(!showQR)}
+                    className="p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
+                >
+                    📱 Pair
+                </button>
             </header>
 
             {/* Main Grid */}
             <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {/* Discovery Area */}
+                {/* Connection Area */}
                 <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    {users.filter(u => u.id !== myUser.id).map(user => (
+                    {Object.values(connections).map(conn => (
                         <motion.div
-                            key={user.id}
+                            key={conn.peer}
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
-                            className={`glass-panel p-6 rounded-3xl relative overflow-hidden transition-all duration-300 ${dragOver === user.id ? 'ring-4 ring-blue-500 bg-white/10' : ''}`}
-                            onDragOver={(e) => handleDragOver(e, user.id)}
+                            className={`glass-panel p-6 rounded-3xl relative overflow-hidden transition-all duration-300 ${dragOver === conn.peer ? 'ring-4 ring-blue-500 bg-white/10' : ''}`}
+                            onDragOver={(e) => handleDragOver(e, conn.peer)}
                             onDragLeave={handleDragLeave}
-                            onDrop={(e) => handleDrop(e, user.id)}
+                            onDrop={(e) => handleDrop(e, conn.peer)}
                         >
                             <div className="flex flex-col items-center gap-4 z-10 relative">
                                 <div className="relative">
-                                    <img src={user.avatar} alt={user.name} className="w-24 h-24 rounded-full bg-black/20" />
-                                    {peers[user.id]?.connected && (
-                                        <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-black" />
-                                    )}
+                                    <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${conn.peer}`} alt="Peer" className="w-24 h-24 rounded-full bg-black/20" />
+                                    <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-black" />
                                 </div>
-                                <h2 className="text-2xl font-bold">{user.name}</h2>
-                                <p className="text-sm text-white/50">{peers[user.id]?.connected ? 'Connected' : 'Connecting...'}</p>
+                                <h2 className="text-xl font-bold truncate w-full text-center">{conn.peer}</h2>
+                                <p className="text-sm text-white/50">Connected</p>
 
                                 {/* Explicit Send Button */}
                                 <button
-                                    onClick={() => openFilePicker(user.id)}
+                                    onClick={() => openFilePicker(conn.peer)}
                                     className="mt-2 px-6 py-2 bg-white/10 hover:bg-white/20 rounded-full text-sm font-medium transition-colors"
                                 >
                                     Send File
                                 </button>
 
                                 {/* Transfer Progress */}
-                                {transfers[user.id] && (
+                                {transfers[conn.peer] && (
                                     <div className="w-full mt-4 bg-black/20 rounded-full h-2 overflow-hidden relative">
                                         <motion.div
                                             className="absolute top-0 left-0 h-full bg-blue-500"
                                             initial={{ width: 0 }}
-                                            animate={{ width: `${(transfers[user.id].type === 'send' ? transfers[user.id].sent : transfers[user.id].received) / transfers[user.id].size * 100}%` }}
+                                            animate={{ width: `${(transfers[conn.peer].type === 'send' ? transfers[conn.peer].sent : transfers[conn.peer].received) / transfers[conn.peer].size * 100}%` }}
                                         />
                                         <p className="text-xs text-center mt-2">
-                                            {transfers[user.id].type === 'send' ? 'Sending' : 'Receiving'} {transfers[user.id].fileName}
+                                            {transfers[conn.peer].type === 'send' ? 'Sending' : 'Receiving'} {transfers[conn.peer].fileName}
                                         </p>
                                     </div>
                                 )}
@@ -244,10 +227,10 @@ function App() {
                         </motion.div>
                     ))}
 
-                    {users.length <= 1 && (
-                        <div className="col-span-full flex flex-col items-center justify-center p-12 text-white/30">
-                            <div className="w-16 h-16 border-4 border-white/10 border-t-blue-500 rounded-full animate-spin mb-4" />
-                            <p>Waiting for peers in Room {roomId}...</p>
+                    {Object.keys(connections).length === 0 && (
+                        <div className="col-span-full flex flex-col items-center justify-center p-12 text-white/30 border-2 border-dashed border-white/10 rounded-3xl">
+                            <p className="mb-4">No connections yet</p>
+                            <p className="text-sm">Share your ID or scan a QR code to connect</p>
                         </div>
                     )}
                 </div>
