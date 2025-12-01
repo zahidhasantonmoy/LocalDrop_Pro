@@ -12,16 +12,16 @@ export const useWebRTC = (myUserData) => {
     const [myPeerId, setMyPeerId] = useState('');
     const [connections, setConnections] = useState({}); // peerId -> DataConnection
     const [transfers, setTransfers] = useState({}); // peerId -> transfer info
+    const [clipboardHistory, setClipboardHistory] = useState([]); // Array of { text, sender, timestamp }
 
     const peerRef = useRef(null);
     const chunksRef = useRef({}); // peerId -> array of chunks
     const incomingMetaRef = useRef({}); // peerId -> metadata
     const activeTransfersRef = useRef({}); // peerId -> boolean (true if active)
+    const lastChunkTimeRef = useRef({}); // peerId -> timestamp
 
     useEffect(() => {
         // Initialize PeerJS with a custom 6-digit ID
-        // Note: PeerJS Cloud might have collisions, so we retry if taken
-        // But for this demo we'll just try once with a random ID
         const id = generateShortId();
         const peer = new Peer(id);
 
@@ -37,7 +37,6 @@ export const useWebRTC = (myUserData) => {
 
         peer.on('error', (err) => {
             console.error('PeerJS error:', err);
-            // If ID is taken, we could retry here, but for now just log
         });
 
         peerRef.current = peer;
@@ -85,8 +84,14 @@ export const useWebRTC = (myUserData) => {
             activeTransfersRef.current[peerId] = false;
             setTransfers(prev => ({
                 ...prev,
-                [peerId]: { ...prev[peerId], status: 'cancelled' }
+                [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
             }));
+            return;
+        }
+
+        // Handle Clipboard
+        if (data && data.type === 'clipboard') {
+            setClipboardHistory(prev => [{ text: data.text, sender: peerId, timestamp: Date.now() }, ...prev]);
             return;
         }
 
@@ -101,6 +106,7 @@ export const useWebRTC = (myUserData) => {
             chunksRef.current[peerId] = [];
             incomingMetaRef.current[peerId] = data;
             activeTransfersRef.current[peerId] = true;
+            lastChunkTimeRef.current[peerId] = Date.now();
 
             setTransfers(prev => ({
                 ...prev,
@@ -110,7 +116,8 @@ export const useWebRTC = (myUserData) => {
                     size: data.size,
                     received: 0,
                     startTime: Date.now(),
-                    status: 'in-progress'
+                    status: 'in-progress',
+                    speed: 0
                 }
             }));
         } else if (data && data.type === 'file-end') {
@@ -126,7 +133,8 @@ export const useWebRTC = (myUserData) => {
                 [peerId]: {
                     ...prev[peerId],
                     status: 'completed',
-                    blobUrl: url
+                    blobUrl: url,
+                    speed: 0
                 }
             }));
 
@@ -140,12 +148,33 @@ export const useWebRTC = (myUserData) => {
             if (!chunksRef.current[peerId]) chunksRef.current[peerId] = [];
             chunksRef.current[peerId].push(data);
 
+            // Calculate Speed
+            const now = Date.now();
+            const timeDiff = now - lastChunkTimeRef.current[peerId];
+            let speed = 0;
+            if (timeDiff > 500) { // Update speed every 500ms
+                // This is a rough estimate, ideally we'd track bytes over time
+                // For simplicity, we'll just leave it as 0 or implement a better moving average later
+                // Actually, let's just not update speed on every chunk to avoid re-renders
+                lastChunkTimeRef.current[peerId] = now;
+            }
+
             setTransfers(prev => {
                 const current = prev[peerId];
                 if (!current) return prev;
+
+                // Simple speed calc: bytes / (now - startTime) * 1000
+                const elapsed = (now - current.startTime) / 1000;
+                const newReceived = current.received + data.byteLength;
+                const currentSpeed = elapsed > 0 ? newReceived / elapsed : 0;
+
                 return {
                     ...prev,
-                    [peerId]: { ...current, received: current.received + data.byteLength }
+                    [peerId]: {
+                        ...current,
+                        received: newReceived,
+                        speed: currentSpeed
+                    }
                 };
             });
         }
@@ -164,7 +193,8 @@ export const useWebRTC = (myUserData) => {
                 size: file.size,
                 sent: 0,
                 startTime: Date.now(),
-                status: 'in-progress'
+                status: 'in-progress',
+                speed: 0
             }
         }));
 
@@ -199,9 +229,19 @@ export const useWebRTC = (myUserData) => {
             setTransfers(prev => {
                 const current = prev[peerId];
                 if (!current) return prev;
+
+                // Calculate Speed
+                const now = Date.now();
+                const elapsed = (now - current.startTime) / 1000;
+                const currentSpeed = elapsed > 0 ? offset / elapsed : 0;
+
                 return {
                     ...prev,
-                    [peerId]: { ...current, sent: Math.min(offset, file.size) }
+                    [peerId]: {
+                        ...current,
+                        sent: Math.min(offset, file.size),
+                        speed: currentSpeed
+                    }
                 };
             });
 
@@ -211,7 +251,7 @@ export const useWebRTC = (myUserData) => {
                 conn.send({ type: 'file-end' });
                 setTransfers(prev => ({
                     ...prev,
-                    [peerId]: { ...prev[peerId], status: 'completed' }
+                    [peerId]: { ...prev[peerId], status: 'completed', speed: 0 }
                 }));
                 activeTransfersRef.current[peerId] = false;
             }
@@ -228,9 +268,15 @@ export const useWebRTC = (myUserData) => {
         }
         setTransfers(prev => ({
             ...prev,
-            [peerId]: { ...prev[peerId], status: 'cancelled' }
+            [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
         }));
     };
 
-    return { myPeerId, connections, connectToPeer, sendFile, transfers, cancelTransfer };
+    const sendClipboard = (text) => {
+        Object.values(connections).forEach(conn => {
+            conn.send({ type: 'clipboard', text });
+        });
+    };
+
+    return { myPeerId, connections, connectToPeer, sendFile, transfers, cancelTransfer, sendClipboard, clipboardHistory };
 };

@@ -11,17 +11,42 @@ const generateUser = () => {
     return { name };
 };
 
-const myUser = generateUser();
-
 function App() {
-    const { myPeerId, connections, connectToPeer, sendFile, transfers, cancelTransfer } = useWebRTC(myUser);
+    // Persistence: Load User
+    const [myUser, setMyUser] = useState(() => {
+        const saved = localStorage.getItem('localdrop_user');
+        return saved ? JSON.parse(saved) : generateUser();
+    });
+
+    useEffect(() => {
+        localStorage.setItem('localdrop_user', JSON.stringify(myUser));
+    }, [myUser]);
+
+    const { myPeerId, connections, connectToPeer, sendFile, transfers, cancelTransfer, sendClipboard, clipboardHistory } = useWebRTC(myUser);
+
     const [showQR, setShowQR] = useState(false);
-    const [clipboardText, setClipboardText] = useState('');
+    const [clipboardInput, setClipboardInput] = useState('');
     const [dragOver, setDragOver] = useState(null); // peerId
     const [targetId, setTargetId] = useState('');
-    const [history, setHistory] = useState([]); // Array of transfer objects
+
+    // Persistence: Load History
+    const [history, setHistory] = useState(() => {
+        const saved = localStorage.getItem('localdrop_history');
+        return saved ? JSON.parse(saved) : [];
+    });
+
+    useEffect(() => {
+        localStorage.setItem('localdrop_history', JSON.stringify(history));
+    }, [history]);
+
     const fileInputRef = useRef(null);
     const [selectedPeer, setSelectedPeer] = useState(null);
+
+    // Sound Effects
+    const playSound = (type) => {
+        // Simple base64 sounds could be added here, or just visual cues
+        // For now, we'll rely on visual cues as requested assets aren't available
+    };
 
     useEffect(() => {
         // Check URL for peer ID to connect to
@@ -39,7 +64,9 @@ function App() {
                 setHistory(prev => {
                     // Avoid duplicates based on startTime
                     if (prev.find(h => h.startTime === transfer.startTime)) return prev;
-                    return [{ ...transfer, peerId, timestamp: new Date() }, ...prev];
+                    const newItem = { ...transfer, peerId, timestamp: new Date() };
+                    playSound('complete');
+                    return [newItem, ...prev];
                 });
             }
         });
@@ -131,6 +158,18 @@ function App() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
+    const formatSpeed = (bytesPerSec) => {
+        if (!bytesPerSec) return '0 KB/s';
+        return formatSize(bytesPerSec) + '/s';
+    };
+
+    const handleSendClipboard = () => {
+        if (clipboardInput.trim()) {
+            sendClipboard(clipboardInput);
+            setClipboardInput('');
+        }
+    };
+
     const localUrl = `${window.location.origin}?peer=${myPeerId}`;
 
     return (
@@ -155,11 +194,11 @@ function App() {
             <header className="flex flex-col md:flex-row justify-between items-center mb-8 glass-panel p-6 rounded-3xl gap-6 shadow-2xl border border-white/10">
                 <div className="flex items-center gap-6 w-full md:w-auto">
                     <div className="relative">
-                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${myPeerId}`} alt="Me" className="w-20 h-20 rounded-2xl border-2 border-white/20 bg-white/5 p-1" />
+                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${myPeerId}`} alt="Me" className="w-16 h-16 md:w-20 md:h-20 rounded-2xl border-2 border-white/20 bg-white/5 p-1" />
                         <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-4 border-[#1a1a1a]" />
                     </div>
                     <div>
-                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">{myUser.name}</h1>
+                        <h1 className="text-2xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">{myUser.name}</h1>
                         <div className="flex items-center gap-3 mt-1">
                             <span className="text-sm text-white/50 font-mono bg-black/30 px-3 py-1 rounded-lg">ID: {myPeerId}</span>
                             <button
@@ -181,7 +220,7 @@ function App() {
                         onChange={(e) => setTargetId(e.target.value)}
                         maxLength={6}
                     />
-                    <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-blue-500/25">
+                    <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-6 md:px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-blue-500/25">
                         Connect
                     </button>
                 </form>
@@ -198,14 +237,14 @@ function App() {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.9 }}
-                                className={`glass-panel p-8 rounded-3xl relative overflow-hidden transition-all duration-300 ${dragOver === conn.peer ? 'ring-4 ring-blue-500 bg-white/10 scale-[1.02]' : ''}`}
+                                className={`glass-panel p-6 md:p-8 rounded-3xl relative overflow-hidden transition-all duration-300 ${dragOver === conn.peer ? 'ring-4 ring-blue-500 bg-white/10 scale-[1.02]' : ''}`}
                                 onDragOver={(e) => handleDragOver(e, conn.peer)}
                                 onDragLeave={handleDragLeave}
                                 onDrop={(e) => handleDrop(e, conn.peer)}
                             >
                                 <div className="flex flex-col md:flex-row items-center gap-8 z-10 relative">
                                     <div className="relative shrink-0">
-                                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${conn.peer}`} alt="Peer" className="w-24 h-24 rounded-2xl bg-black/20 p-2" />
+                                        <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${conn.peer}`} alt="Peer" className="w-20 h-20 md:w-24 md:h-24 rounded-2xl bg-black/20 p-2" />
                                         <div className="absolute -bottom-2 -right-2 w-6 h-6 bg-green-500 rounded-full border-4 border-[#1a1a1a]" />
                                     </div>
 
@@ -234,13 +273,16 @@ function App() {
                                             className="mt-8 bg-black/20 rounded-2xl p-6 border border-white/5"
                                         >
                                             <div className="flex justify-between items-start mb-4">
-                                                <div>
+                                                <div className="overflow-hidden">
                                                     <h3 className="font-bold text-lg truncate max-w-[200px] md:max-w-md">{transfers[conn.peer].fileName}</h3>
-                                                    <p className="text-sm text-white/50 mt-1">
-                                                        {formatSize(transfers[conn.peer].size)} • {new Date(transfers[conn.peer].startTime).toLocaleTimeString()}
+                                                    <p className="text-sm text-white/50 mt-1 flex gap-2">
+                                                        <span>{formatSize(transfers[conn.peer].size)}</span>
+                                                        {transfers[conn.peer].status === 'in-progress' && (
+                                                            <span className="text-blue-400">• {formatSpeed(transfers[conn.peer].speed)}</span>
+                                                        )}
                                                     </p>
                                                 </div>
-                                                <div className="text-right">
+                                                <div className="text-right shrink-0 ml-2">
                                                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${transfers[conn.peer].status === 'completed' ? 'bg-green-500/20 text-green-400' :
                                                             transfers[conn.peer].status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
                                                                 'bg-blue-500/20 text-blue-400'
@@ -302,6 +344,44 @@ function App() {
 
                 {/* Sidebar */}
                 <div className="flex flex-col gap-6">
+                    {/* Universal Clipboard */}
+                    <div className="glass-panel p-6 rounded-3xl border border-white/10">
+                        <h3 className="mb-4 font-bold flex items-center gap-2">
+                            <span>📋</span> Universal Clipboard
+                        </h3>
+                        <div className="flex gap-2 mb-4">
+                            <input
+                                type="text"
+                                className="flex-1 bg-black/20 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Type or paste text..."
+                                value={clipboardInput}
+                                onChange={(e) => setClipboardInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSendClipboard()}
+                            />
+                            <button
+                                onClick={handleSendClipboard}
+                                className="bg-blue-600 hover:bg-blue-500 px-4 rounded-xl font-bold transition-colors"
+                            >
+                                Send
+                            </button>
+                        </div>
+
+                        {/* Clipboard History */}
+                        <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                            {clipboardHistory.map((item, i) => (
+                                <div key={i} className="bg-white/5 p-3 rounded-xl text-sm break-all">
+                                    <p>{item.text}</p>
+                                    <p className="text-[10px] text-white/30 mt-1 text-right">
+                                        {new Date(item.timestamp).toLocaleTimeString()}
+                                    </p>
+                                </div>
+                            ))}
+                            {clipboardHistory.length === 0 && (
+                                <p className="text-center text-white/30 text-xs py-4">No clipboard history</p>
+                            )}
+                        </div>
+                    </div>
+
                     {/* QR Code */}
                     <AnimatePresence>
                         {showQR && (
@@ -343,7 +423,7 @@ function App() {
                                     </div>
                                     <div className="flex justify-between items-center text-xs text-white/40">
                                         <span>{formatSize(item.size)}</span>
-                                        <span>{item.timestamp?.toLocaleTimeString()}</span>
+                                        <span>{new Date(item.timestamp).toLocaleTimeString()}</span>
                                     </div>
                                 </div>
                             ))}
