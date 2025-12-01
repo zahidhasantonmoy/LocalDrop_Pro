@@ -16,13 +16,15 @@ export const useWebRTC = (myUserData) => {
 
     const [connections, setConnections] = useState({}); // peerId -> DataConnection
     const [transfers, setTransfers] = useState({}); // peerId -> transfer info
-    const [clipboardHistory, setClipboardHistory] = useState([]);
+    const [chatHistory, setChatHistory] = useState({}); // peerId -> array of { text, sender, timestamp }
+    const [fileQueue, setFileQueue] = useState({}); // peerId -> array of File objects
 
     const peerRef = useRef(null);
     const chunksRef = useRef({}); // peerId -> array of chunks
     const incomingMetaRef = useRef({}); // peerId -> metadata
     const activeTransfersRef = useRef({}); // peerId -> { active: bool, paused: bool, offset: number, file: File (sender only) }
     const lastChunkTimeRef = useRef({}); // peerId -> timestamp
+    const queueRef = useRef({}); // peerId -> array of File objects (Ref for immediate access)
 
     // Persistence: Save ID
     useEffect(() => {
@@ -52,7 +54,6 @@ export const useWebRTC = (myUserData) => {
 
     useEffect(() => {
         // Initialize PeerJS
-        // If we have a stored ID, try to use it. If taken/error, we might need to generate new.
         const startPeer = (idToUse) => {
             const id = idToUse || generateShortId();
             const peer = new Peer(id);
@@ -110,6 +111,12 @@ export const useWebRTC = (myUserData) => {
             console.log('Connection opened:', conn.peer);
             setConnections(prev => ({ ...prev, [conn.peer]: conn }));
             conn.send({ type: 'user-info', user: myUserData });
+
+            // Initialize chat history if empty
+            setChatHistory(prev => {
+                if (!prev[conn.peer]) return { ...prev, [conn.peer]: [] };
+                return prev;
+            });
         });
 
         conn.on('data', (data) => {
@@ -127,260 +134,322 @@ export const useWebRTC = (myUserData) => {
 
         conn.on('error', (err) => {
             console.error('Connection error:', err);
-        }
+        });
+    };
+
+    const handleData = (peerId, data) => {
+        // Handle Control Messages
+        if (data && data.type === 'control') {
+            console.log('Received control message:', data);
+            if (data.action === 'cancel') {
+                if (activeTransfersRef.current[peerId]) {
+                    activeTransfersRef.current[peerId].active = false;
+                }
+                setTransfers(prev => ({
+                    ...prev,
+                    [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
+                }));
+                processQueue(peerId); // Try next file
+            } else if (data.action === 'pause') {
+                if (activeTransfersRef.current[peerId]) {
+                    activeTransfersRef.current[peerId].paused = true;
+                }
+                setTransfers(prev => ({
+                    ...prev,
+                    [peerId]: { ...prev[peerId], status: 'paused', speed: 0 }
+                }));
+            } else if (data.action === 'resume') {
+                if (activeTransfersRef.current[peerId] && activeTransfersRef.current[peerId].file) {
+                    activeTransfersRef.current[peerId].paused = false;
+                    activeTransfersRef.current[peerId].active = true;
+                    sendChunkLoop(peerId, activeTransfersRef.current[peerId].file, data.offset);
+
+                    setTransfers(prev => ({
+                        ...prev,
+                        [peerId]: { ...prev[peerId], status: 'in-progress' }
+                    }));
+                }
+            }
             return;
-    }
+        }
 
-    // Handle Clipboard
-    if (data && data.type === 'clipboard') {
-        setClipboardHistory(prev => [{ text: data.text, sender: peerId, timestamp: Date.now() }, ...prev]);
-        return;
-    }
+        // Handle Chat
+        if (data && data.type === 'chat') {
+            setChatHistory(prev => ({
+                ...prev,
+                [peerId]: [...(prev[peerId] || []), { text: data.text, sender: peerId, timestamp: Date.now() }]
+            }));
+            return;
+        }
 
-    // Handle File Transfer
-    if (data && data.type === 'file-start') {
-        chunksRef.current[peerId] = [];
-        incomingMetaRef.current[peerId] = data;
-        activeTransfersRef.current[peerId] = { active: true, paused: false, offset: 0 };
-        lastChunkTimeRef.current[peerId] = Date.now();
+        // Handle File Transfer
+        if (data && data.type === 'file-start') {
+            chunksRef.current[peerId] = [];
+            incomingMetaRef.current[peerId] = data;
+            activeTransfersRef.current[peerId] = { active: true, paused: false, offset: 0 };
+            lastChunkTimeRef.current[peerId] = Date.now();
+
+            setTransfers(prev => ({
+                ...prev,
+                [peerId]: {
+                    type: 'receive',
+                    fileName: data.name,
+                    size: data.size,
+                    received: 0,
+                    startTime: Date.now(),
+                    status: 'in-progress',
+                    speed: 0
+                }
+            }));
+        } else if (data && data.type === 'file-end') {
+            if (!activeTransfersRef.current[peerId]?.active) return;
+
+            const meta = incomingMetaRef.current[peerId];
+            const blob = new Blob(chunksRef.current[peerId], { type: meta.mimeType });
+            const url = URL.createObjectURL(blob);
+
+            setTransfers(prev => ({
+                ...prev,
+                [peerId]: {
+                    ...prev[peerId],
+                    status: 'completed',
+                    blobUrl: url,
+                    speed: 0,
+                    received: meta.size
+                }
+            }));
+
+            chunksRef.current[peerId] = [];
+            activeTransfersRef.current[peerId] = null;
+
+        } else if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
+            if (!activeTransfersRef.current[peerId]?.active || activeTransfersRef.current[peerId]?.paused) return;
+
+            if (!chunksRef.current[peerId]) chunksRef.current[peerId] = [];
+            chunksRef.current[peerId].push(data);
+
+            const currentRef = activeTransfersRef.current[peerId];
+            currentRef.offset += data.byteLength;
+
+            const now = Date.now();
+            const timeDiff = now - lastChunkTimeRef.current[peerId];
+            if (timeDiff > 1000) {
+                lastChunkTimeRef.current[peerId] = now;
+            }
+
+            setTransfers(prev => {
+                const current = prev[peerId];
+                if (!current) return prev;
+
+                const elapsed = (now - current.startTime) / 1000;
+                const newReceived = current.received + data.byteLength;
+                const currentSpeed = elapsed > 0 ? newReceived / elapsed : 0;
+
+                return {
+                    ...prev,
+                    [peerId]: {
+                        ...current,
+                        received: newReceived,
+                        speed: currentSpeed
+                    }
+                };
+            });
+        }
+    };
+
+    const sendFiles = (peerId, files) => {
+        const conn = connections[peerId];
+        if (!conn) return;
+
+        // Add to queue
+        const newQueue = [...(queueRef.current[peerId] || []), ...files];
+        queueRef.current[peerId] = newQueue;
+        setFileQueue(prev => ({ ...prev, [peerId]: newQueue }));
+
+        // If no active transfer, start processing
+        if (!activeTransfersRef.current[peerId] || !activeTransfersRef.current[peerId].active) {
+            processQueue(peerId);
+        }
+    };
+
+    const processQueue = (peerId) => {
+        const queue = queueRef.current[peerId];
+        if (queue && queue.length > 0) {
+            const file = queue[0];
+            // Remove from queue
+            const remaining = queue.slice(1);
+            queueRef.current[peerId] = remaining;
+            setFileQueue(prev => ({ ...prev, [peerId]: remaining }));
+
+            // Start transfer
+            startFileTransfer(peerId, file);
+        }
+    };
+
+    const startFileTransfer = (peerId, file) => {
+        const conn = connections[peerId];
+        if (!conn) return;
+
+        activeTransfersRef.current[peerId] = { active: true, paused: false, offset: 0, file: file };
 
         setTransfers(prev => ({
             ...prev,
             [peerId]: {
-                type: 'receive',
-                fileName: data.name,
-                size: data.size,
-                received: 0,
+                type: 'send',
+                fileName: file.name,
+                size: file.size,
+                sent: 0,
                 startTime: Date.now(),
                 status: 'in-progress',
                 speed: 0
             }
         }));
-    } else if (data && data.type === 'file-end') {
-        if (!activeTransfersRef.current[peerId]?.active) return;
 
-        const meta = incomingMetaRef.current[peerId];
-        const blob = new Blob(chunksRef.current[peerId], { type: meta.mimeType });
-        const url = URL.createObjectURL(blob);
+        conn.send({
+            type: 'file-start',
+            name: file.name,
+            size: file.size,
+            mimeType: file.type
+        });
+
+        sendChunkLoop(peerId, file, 0);
+    };
+
+    const sendChunkLoop = (peerId, file, startOffset) => {
+        const conn = connections[peerId];
+        let offset = startOffset;
+        const reader = new FileReader();
+
+        const readSlice = () => {
+            const state = activeTransfersRef.current[peerId];
+            if (!state || !state.active) return;
+            if (state.paused) return;
+
+            const slice = file.slice(offset, offset + CHUNK_SIZE);
+            reader.readAsArrayBuffer(slice);
+        };
+
+        reader.onload = (e) => {
+            const state = activeTransfersRef.current[peerId];
+            if (!conn.open || !state || !state.active || state.paused) return;
+
+            conn.send(e.target.result);
+            offset += CHUNK_SIZE;
+            state.offset = offset;
+
+            setTransfers(prev => {
+                const current = prev[peerId];
+                if (!current) return prev;
+
+                const now = Date.now();
+                const elapsed = (now - current.startTime) / 1000;
+                const currentSpeed = elapsed > 0 ? offset / elapsed : 0;
+
+                return {
+                    ...prev,
+                    [peerId]: {
+                        ...current,
+                        sent: Math.min(offset, file.size),
+                        speed: currentSpeed
+                    }
+                };
+            });
+
+            if (offset < file.size) {
+                setTimeout(readSlice, 5);
+            } else {
+                conn.send({ type: 'file-end' });
+                setTransfers(prev => ({
+                    ...prev,
+                    [peerId]: { ...prev[peerId], status: 'completed', speed: 0 }
+                }));
+                activeTransfersRef.current[peerId] = null;
+
+                // Process next file in queue
+                processQueue(peerId);
+            }
+        };
+
+        readSlice();
+    };
+
+    const cancelTransfer = (peerId) => {
+        if (activeTransfersRef.current[peerId]) {
+            activeTransfersRef.current[peerId].active = false;
+        }
+        const conn = connections[peerId];
+        if (conn) {
+            conn.send({ type: 'control', action: 'cancel' });
+        }
+        setTransfers(prev => ({
+            ...prev,
+            [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
+        }));
+
+        // If cancelled, should we continue queue? 
+        // Usually yes, but let's pause queue or just continue. 
+        // For now, let's continue.
+        processQueue(peerId);
+    };
+
+    const pauseTransfer = (peerId) => {
+        if (activeTransfersRef.current[peerId]) {
+            activeTransfersRef.current[peerId].paused = true;
+        }
+        const conn = connections[peerId];
+        if (conn) {
+            conn.send({ type: 'control', action: 'pause' });
+        }
+        setTransfers(prev => ({
+            ...prev,
+            [peerId]: { ...prev[peerId], status: 'paused', speed: 0 }
+        }));
+    };
+
+    const resumeTransfer = (peerId) => {
+        const transfer = transfers[peerId];
+        const conn = connections[peerId];
+
+        if (transfer.type === 'send') {
+            if (activeTransfersRef.current[peerId]) {
+                activeTransfersRef.current[peerId].paused = false;
+                activeTransfersRef.current[peerId].active = true;
+                sendChunkLoop(peerId, activeTransfersRef.current[peerId].file, activeTransfersRef.current[peerId].offset);
+            }
+        } else {
+            if (conn) {
+                conn.send({ type: 'control', action: 'resume', offset: transfer.received });
+            }
+        }
 
         setTransfers(prev => ({
             ...prev,
-            [peerId]: {
-                ...prev[peerId],
-                status: 'completed',
-                blobUrl: url,
-                speed: 0,
-                received: meta.size // Ensure 100%
-            }
+            [peerId]: { ...prev[peerId], status: 'in-progress' }
         }));
-
-        chunksRef.current[peerId] = [];
-        activeTransfersRef.current[peerId] = null;
-
-    } else if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
-        if (!activeTransfersRef.current[peerId]?.active || activeTransfersRef.current[peerId]?.paused) return;
-
-        // Binary chunk
-        if (!chunksRef.current[peerId]) chunksRef.current[peerId] = [];
-        chunksRef.current[peerId].push(data);
-
-        const currentRef = activeTransfersRef.current[peerId];
-        currentRef.offset += data.byteLength;
-
-        // Calculate Speed
-        const now = Date.now();
-        const timeDiff = now - lastChunkTimeRef.current[peerId];
-        if (timeDiff > 1000) { // Update speed every 1s
-            lastChunkTimeRef.current[peerId] = now;
-        }
-
-        setTransfers(prev => {
-            const current = prev[peerId];
-            if (!current) return prev;
-
-            const elapsed = (now - current.startTime) / 1000;
-            const newReceived = current.received + data.byteLength;
-            const currentSpeed = elapsed > 0 ? newReceived / elapsed : 0;
-
-            return {
-                ...prev,
-                [peerId]: {
-                    ...current,
-                    received: newReceived,
-                    speed: currentSpeed
-                }
-            };
-        });
-    }
-};
-
-const sendFile = (peerId, file) => {
-    const conn = connections[peerId];
-    if (!conn) return;
-
-    activeTransfersRef.current[peerId] = { active: true, paused: false, offset: 0, file: file };
-
-    setTransfers(prev => ({
-        ...prev,
-        [peerId]: {
-            type: 'send',
-            fileName: file.name,
-            size: file.size,
-            sent: 0,
-            startTime: Date.now(),
-            status: 'in-progress',
-            speed: 0
-        }
-    }));
-
-    // Send metadata
-    conn.send({
-        type: 'file-start',
-        name: file.name,
-        size: file.size,
-        mimeType: file.type
-    });
-
-    sendChunkLoop(peerId, file, 0);
-};
-
-const sendChunkLoop = (peerId, file, startOffset) => {
-    const conn = connections[peerId];
-    let offset = startOffset;
-    const reader = new FileReader();
-
-    const readSlice = () => {
-        const state = activeTransfersRef.current[peerId];
-        if (!state || !state.active) {
-            // Cancelled or finished
-            return;
-        }
-        if (state.paused) {
-            // Paused, stop loop
-            return;
-        }
-
-        const slice = file.slice(offset, offset + CHUNK_SIZE);
-        reader.readAsArrayBuffer(slice);
     };
 
-    reader.onload = (e) => {
-        const state = activeTransfersRef.current[peerId];
-        if (!conn.open || !state || !state.active || state.paused) return;
-
-        conn.send(e.target.result);
-        offset += CHUNK_SIZE;
-        state.offset = offset;
-
-        setTransfers(prev => {
-            const current = prev[peerId];
-            if (!current) return prev;
-
-            const now = Date.now();
-            const elapsed = (now - current.startTime) / 1000;
-            const currentSpeed = elapsed > 0 ? offset / elapsed : 0;
-
-            return {
-                ...prev,
-                [peerId]: {
-                    ...current,
-                    sent: Math.min(offset, file.size),
-                    speed: currentSpeed
-                }
-            };
-        });
-
-        if (offset < file.size) {
-            // Use setTimeout to avoid blocking UI and allow pause checks
-            setTimeout(readSlice, 5);
-        } else {
-            conn.send({ type: 'file-end' });
-            setTransfers(prev => ({
-                ...prev,
-                [peerId]: { ...prev[peerId], status: 'completed', speed: 0 }
-            }));
-            activeTransfersRef.current[peerId] = null;
-        }
-    };
-
-    readSlice();
-};
-
-const cancelTransfer = (peerId) => {
-    if (activeTransfersRef.current[peerId]) {
-        activeTransfersRef.current[peerId].active = false;
-    }
-    const conn = connections[peerId];
-    if (conn) {
-        conn.send({ type: 'control', action: 'cancel' });
-    }
-    setTransfers(prev => ({
-        ...prev,
-        [peerId]: { ...prev[peerId], status: 'cancelled', speed: 0 }
-    }));
-};
-
-const pauseTransfer = (peerId) => {
-    // Only sender can pause effectively in this simple model, 
-    // or receiver sends pause request.
-    // Let's allow both to pause.
-    if (activeTransfersRef.current[peerId]) {
-        activeTransfersRef.current[peerId].paused = true;
-    }
-
-    const conn = connections[peerId];
-    if (conn) {
-        conn.send({ type: 'control', action: 'pause' });
-    }
-
-    setTransfers(prev => ({
-        ...prev,
-        [peerId]: { ...prev[peerId], status: 'paused', speed: 0 }
-    }));
-};
-
-const resumeTransfer = (peerId) => {
-    // If I am sender, I just resume.
-    // If I am receiver, I ask sender to resume from my received amount.
-    const transfer = transfers[peerId];
-    const conn = connections[peerId];
-
-    if (transfer.type === 'send') {
-        if (activeTransfersRef.current[peerId]) {
-            activeTransfersRef.current[peerId].paused = false;
-            activeTransfersRef.current[peerId].active = true;
-            // Resume loop
-            sendChunkLoop(peerId, activeTransfersRef.current[peerId].file, activeTransfersRef.current[peerId].offset);
-        }
-    } else {
-        // Receiver asking for resume
+    const sendChatMessage = (peerId, text) => {
+        const conn = connections[peerId];
         if (conn) {
-            conn.send({ type: 'control', action: 'resume', offset: transfer.received });
+            conn.send({ type: 'chat', text });
+            setChatHistory(prev => ({
+                ...prev,
+                [peerId]: [...(prev[peerId] || []), { text, sender: 'me', timestamp: Date.now() }]
+            }));
         }
-    }
+    };
 
-    setTransfers(prev => ({
-        ...prev,
-        [peerId]: { ...prev[peerId], status: 'in-progress' }
-    }));
-};
-
-const sendClipboard = (text) => {
-    Object.values(connections).forEach(conn => {
-        conn.send({ type: 'clipboard', text });
-    });
-};
-
-return {
-    myPeerId,
-    connections,
-    connectToPeer,
-    sendFile,
-    transfers,
-    cancelTransfer,
-    pauseTransfer,
-    resumeTransfer,
-    sendClipboard,
-    clipboardHistory
-};
+    return {
+        myPeerId,
+        connections,
+        connectToPeer,
+        sendFiles,
+        transfers,
+        cancelTransfer,
+        pauseTransfer,
+        resumeTransfer,
+        sendChatMessage,
+        chatHistory,
+        fileQueue
+    };
 };
