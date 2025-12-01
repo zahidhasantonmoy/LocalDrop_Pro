@@ -1,0 +1,12 @@
+{
+    "rewrites": [
+        {
+            "source": "/api/socket",
+            "destination": "/api/socket"
+        },
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
+        }
+    ]
+}

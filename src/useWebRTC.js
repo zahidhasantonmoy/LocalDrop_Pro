@@ -16,14 +16,21 @@ export const useWebRTC = (myUserData) => {
 
     useEffect(() => {
         // Connect to signaling server
-        socketRef.current = io('/', {
+        // For Vercel, we use the same origin but point to the API route
+        const isVercel = import.meta.env.PROD;
+        const url = isVercel ? window.location.origin : (import.meta.env.VITE_SIGNALING_URL || '/');
+        const path = isVercel ? '/api/socket' : '/socket.io';
+
+        socketRef.current = io(url, {
+            path: path,
+            addTrailingSlash: false,
             secure: true,
             rejectUnauthorized: false
         });
 
         socketRef.current.on('connect', () => {
             console.log('Connected to signaling server');
-            socketRef.current.emit('join', myUserData);
+            // Wait for explicit join call
         });
 
         socketRef.current.on('users-list', (existingUsers) => {
@@ -230,5 +237,11 @@ export const useWebRTC = (myUserData) => {
         readSlice();
     };
 
-    return { users, peers, sendFile, transfers };
+    const joinRoom = (roomId) => {
+        if (socketRef.current && socketRef.current.connected) {
+            socketRef.current.emit('join', { userData: myUserData, roomId });
+        }
+    };
+
+    return { users, peers, sendFile, transfers, joinRoom };
 };

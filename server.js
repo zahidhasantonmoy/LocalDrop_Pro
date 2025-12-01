@@ -11,7 +11,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: "*", // Allow all origins for local dev
+        origin: "*", // Allow all origins (including Vercel)
         methods: ["GET", "POST"]
     }
 });
@@ -22,16 +22,13 @@ const users = {};
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    // Get client IP to group users (simplified for local dev, can be expanded)
-    // For local network, we can just use a default room or group by subnet if needed.
-    // Here we'll use a single 'lan' room for simplicity as requested for local drop.
-    const room = 'lan-party';
-
-    socket.join(room);
-
     // Handle user joining
-    socket.on('join', (userData) => {
-        users[socket.id] = { ...userData, id: socket.id };
+    socket.on('join', ({ userData, roomId }) => {
+        const room = roomId || 'default';
+        socket.join(room);
+
+        // Store user with room info
+        users[socket.id] = { ...userData, id: socket.id, room };
 
         // Broadcast to others in the room
         socket.to(room).emit('user-joined', users[socket.id]);
@@ -62,7 +59,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         if (users[socket.id]) {
-            const room = 'lan-party'; // Should track which room user was in
+            const { room } = users[socket.id];
             socket.to(room).emit('user-left', socket.id);
             delete users[socket.id];
         }

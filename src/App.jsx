@@ -15,10 +15,44 @@ const generateUser = () => {
 const myUser = generateUser();
 
 function App() {
-    const { users, peers, sendFile, transfers } = useWebRTC(myUser);
+    const { users, peers, sendFile, transfers, joinRoom } = useWebRTC(myUser);
     const [showQR, setShowQR] = useState(false);
     const [clipboardText, setClipboardText] = useState('');
     const [dragOver, setDragOver] = useState(null); // peerId
+    const [connected, setConnected] = useState(false);
+    const [roomId, setRoomId] = useState('');
+    const [history, setHistory] = useState([]); // Array of transfer objects
+    const fileInputRef = useRef(null);
+    const [selectedPeer, setSelectedPeer] = useState(null);
+
+    useEffect(() => {
+        // Check URL for room ID
+        const params = new URLSearchParams(window.location.search);
+        const room = params.get('room');
+        if (room) {
+            setRoomId(room);
+        }
+    }, []);
+
+    useEffect(() => {
+        // Update history when transfers complete
+        Object.entries(transfers).forEach(([peerId, transfer]) => {
+            if (transfer.sent === transfer.size || transfer.received === transfer.size) {
+                setHistory(prev => {
+                    if (prev.find(h => h.id === transfer.startTime)) return prev;
+                    return [{ ...transfer, peerId, timestamp: new Date() }, ...prev];
+                });
+            }
+        });
+    }, [transfers]);
+
+    const handleJoin = (e) => {
+        e.preventDefault();
+        if (roomId) {
+            joinRoom(roomId);
+            setConnected(true);
+        }
+    };
 
     const handleDragOver = (e, peerId) => {
         e.preventDefault();
@@ -34,10 +68,13 @@ function App() {
         e.preventDefault();
         setDragOver(null);
         const items = e.dataTransfer.items;
+        processItems(items, peerId);
+    };
 
+    const processItems = async (items, peerId) => {
         if (items) {
             for (let i = 0; i < items.length; i++) {
-                const item = items[i].webkitGetAsEntry();
+                const item = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : (items[i].getAsEntry ? items[i].getAsEntry() : null);
                 if (item) {
                     if (item.isFile) {
                         const file = items[i].getAsFile();
@@ -50,6 +87,9 @@ function App() {
                         const file = new File([content], `${item.name}.zip`, { type: "application/zip" });
                         sendFile(peerId, file);
                     }
+                } else if (items[i].kind === 'file') {
+                    const file = items[i].getAsFile();
+                    sendFile(peerId, file);
                 }
             }
         }
@@ -70,10 +110,50 @@ function App() {
         }
     };
 
-    const localUrl = window.location.href;
+    const handleFileSelect = (e) => {
+        if (e.target.files && selectedPeer) {
+            for (let i = 0; i < e.target.files.length; i++) {
+                sendFile(selectedPeer, e.target.files[i]);
+            }
+        }
+        setSelectedPeer(null);
+    };
+
+    const openFilePicker = (peerId) => {
+        setSelectedPeer(peerId);
+        fileInputRef.current.click();
+    };
+
+    const localUrl = `${window.location.origin}?room=${roomId}`;
+
+    if (!connected) {
+        return (
+            <div className="min-h-screen flex items-center justify-center p-4">
+                <div className="glass-panel p-8 rounded-3xl w-full max-w-md text-center">
+                    <h1 className="text-3xl font-bold mb-2">LocalDrop Pro</h1>
+                    <p className="text-white/50 mb-8">Enter a Room PIN to join</p>
+                    <form onSubmit={handleJoin} className="flex flex-col gap-4">
+                        <input
+                            type="text"
+                            placeholder="Room PIN (e.g. 1234)"
+                            className="bg-black/20 border border-white/10 rounded-xl p-4 text-center text-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            value={roomId}
+                            onChange={(e) => setRoomId(e.target.value)}
+                            required
+                        />
+                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-lg transition-colors">
+                            Join Room
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen text-white p-8 relative font-sans">
+            <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+
             {/* Background Elements */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <motion.div
@@ -101,7 +181,7 @@ function App() {
                     </div>
                     <div>
                         <h1 className="text-xl font-bold">{myUser.name}</h1>
-                        <p className="text-xs text-white/50">LocalDrop Pro</p>
+                        <p className="text-xs text-white/50">Room: {roomId}</p>
                     </div>
                 </div>
                 <div className="flex gap-4">
@@ -139,6 +219,14 @@ function App() {
                                 <h2 className="text-2xl font-bold">{user.name}</h2>
                                 <p className="text-sm text-white/50">{peers[user.id]?.connected ? 'Connected' : 'Connecting...'}</p>
 
+                                {/* Explicit Send Button */}
+                                <button
+                                    onClick={() => openFilePicker(user.id)}
+                                    className="mt-2 px-6 py-2 bg-white/10 hover:bg-white/20 rounded-full text-sm font-medium transition-colors"
+                                >
+                                    Send File
+                                </button>
+
                                 {/* Transfer Progress */}
                                 {transfers[user.id] && (
                                     <div className="w-full mt-4 bg-black/20 rounded-full h-2 overflow-hidden relative">
@@ -152,10 +240,6 @@ function App() {
                                         </p>
                                     </div>
                                 )}
-
-                                {!transfers[user.id] && (
-                                    <p className="text-xs text-white/30 mt-4">Drag & Drop files here</p>
-                                )}
                             </div>
                         </motion.div>
                     ))}
@@ -163,7 +247,7 @@ function App() {
                     {users.length <= 1 && (
                         <div className="col-span-full flex flex-col items-center justify-center p-12 text-white/30">
                             <div className="w-16 h-16 border-4 border-white/10 border-t-blue-500 rounded-full animate-spin mb-4" />
-                            <p>Scanning for devices...</p>
+                            <p>Waiting for peers in Room {roomId}...</p>
                         </div>
                     )}
                 </div>
@@ -189,7 +273,7 @@ function App() {
                     </AnimatePresence>
 
                     {/* Universal Clipboard */}
-                    <div className="glass-panel p-6 rounded-3xl flex-1">
+                    <div className="glass-panel p-6 rounded-3xl">
                         <h3 className="mb-4 font-bold flex items-center gap-2">
                             <span>📋</span> Universal Clipboard
                         </h3>
@@ -202,6 +286,27 @@ function App() {
                         <button className="w-full mt-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl transition-colors font-medium">
                             Broadcast to All
                         </button>
+                    </div>
+
+                    {/* History */}
+                    <div className="glass-panel p-6 rounded-3xl flex-1 overflow-hidden flex flex-col">
+                        <h3 className="mb-4 font-bold flex items-center gap-2">
+                            <span>clock</span> Transfer History
+                        </h3>
+                        <div className="overflow-y-auto flex-1 pr-2 space-y-2">
+                            {history.length === 0 && <p className="text-white/30 text-sm text-center py-4">No transfers yet</p>}
+                            {history.map((item, i) => (
+                                <div key={i} className="bg-white/5 p-3 rounded-xl text-sm flex items-center justify-between">
+                                    <div className="truncate flex-1 mr-2">
+                                        <p className="font-medium truncate">{item.fileName}</p>
+                                        <p className="text-xs text-white/50">{item.type === 'send' ? 'Sent' : 'Received'}</p>
+                                    </div>
+                                    <span className="text-xs text-white/30">
+                                        {(item.size / 1024 / 1024).toFixed(1)} MB
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </main>
