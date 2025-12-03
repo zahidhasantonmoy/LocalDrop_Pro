@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import JSZip from 'jszip';
 import { useWebRTC } from './useWebRTC';
+import { SettingsModal } from './components/SettingsModal';
 
 // Themes
 const THEMES = {
@@ -337,6 +338,13 @@ function App() {
                     >
                         📷
                     </button>
+                    <button
+                        onClick={() => setShowSettings(!showSettings)}
+                        className="p-4 rounded-2xl bg-white/10 hover:bg-white/20 transition-colors"
+                        title="Settings"
+                    >
+                        ⚙️
+                    </button>
                 </div>
             </header>
 
@@ -361,7 +369,7 @@ function App() {
                                         <div className="flex items-center gap-4 mb-6">
                                             <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=${conn.peer}`} alt="Peer" className="w-16 h-16 rounded-2xl bg-black/20 p-2" />
                                             <div>
-                                                <h2 className="text-2xl font-bold">Connected Peer</h2>
+                                                <h2 className="text-2xl font-bold">{peerProfiles[conn.peer]?.name || `Peer ${conn.peer.substring(0, 6)}`}</h2>
                                                 <p className="opacity-40 font-mono">ID: {conn.peer}</p>
                                             </div>
                                             <div className="ml-auto">
@@ -563,6 +571,20 @@ function App() {
                     </div>
                 </div>
             </main>
+
+            {/* Settings Modal */}
+            <SettingsModal
+                show={showSettings}
+                onClose={() => setShowSettings(false)}
+                myUser={myUser}
+                setMyUser={setMyUser}
+                soundEnabled={soundEnabled}
+                setSoundEnabled={setSoundEnabled}
+                notificationsEnabled={notificationsEnabled}
+                setNotificationsEnabled={setNotificationsEnabled}
+                notificationService={notificationService}
+                currentTheme={currentTheme}
+            />
         </div>
     );
 }
