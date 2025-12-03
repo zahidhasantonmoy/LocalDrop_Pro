@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Peer from 'peerjs';
+import notificationService from './NotificationService';
 
 const CHUNK_SIZE = 64 * 1024; // 64KB
 
@@ -18,6 +19,11 @@ export const useWebRTC = (myUserData) => {
     const [transfers, setTransfers] = useState({}); // peerId -> transfer info
     const [chatHistory, setChatHistory] = useState({}); // peerId -> array of { text, sender, timestamp }
     const [fileQueue, setFileQueue] = useState({}); // peerId -> array of File objects
+    const [peerProfiles, setPeerProfiles] = useState(() => {
+        // Load saved peer profiles (custom names, etc.)
+        const saved = localStorage.getItem('localdrop_peer_profiles');
+        return saved ? JSON.parse(saved) : {};
+    });
 
     const peerRef = useRef(null);
     const chunksRef = useRef({}); // peerId -> array of chunks
@@ -96,6 +102,11 @@ export const useWebRTC = (myUserData) => {
         }
     }, [connections]);
 
+    // Persist peer profiles
+    useEffect(() => {
+        localStorage.setItem('localdrop_peer_profiles', JSON.stringify(peerProfiles));
+    }, [peerProfiles]);
+
     const connectToPeer = (targetPeerId) => {
         if (!peerRef.current || targetPeerId === myPeerId) return;
         // Check if already connected
@@ -117,6 +128,10 @@ export const useWebRTC = (myUserData) => {
                 if (!prev[conn.peer]) return { ...prev, [conn.peer]: [] };
                 return prev;
             });
+
+            // Notify connection
+            const peerName = peerProfiles[conn.peer]?.name || `Peer ${conn.peer}`;
+            notificationService.notifyConnection(peerName);
         });
 
         conn.on('data', (data) => {
@@ -125,6 +140,9 @@ export const useWebRTC = (myUserData) => {
 
         conn.on('close', () => {
             console.log('Connection closed:', conn.peer);
+            const peerName = peerProfiles[conn.peer]?.name || `Peer ${conn.peer}`;
+            notificationService.notifyDisconnection(peerName);
+
             setConnections(prev => {
                 const newConns = { ...prev };
                 delete newConns[conn.peer];
@@ -173,12 +191,29 @@ export const useWebRTC = (myUserData) => {
             return;
         }
 
+        // Handle User Info
+        if (data && data.type === 'user-info') {
+            setPeerProfiles(prev => ({
+                ...prev,
+                [peerId]: {
+                    ...prev[peerId],
+                    name: data.user?.name || `Peer ${peerId}`,
+                    lastSeen: Date.now()
+                }
+            }));
+            return;
+        }
+
         // Handle Chat
         if (data && data.type === 'chat') {
             setChatHistory(prev => ({
                 ...prev,
                 [peerId]: [...(prev[peerId] || []), { text: data.text, sender: peerId, timestamp: Date.now() }]
             }));
+
+            // Notify new message
+            const peerName = peerProfiles[peerId]?.name || `Peer ${peerId}`;
+            notificationService.notifyMessage(peerName, data.text);
             return;
         }
 
@@ -218,6 +253,9 @@ export const useWebRTC = (myUserData) => {
                     received: meta.size
                 }
             }));
+
+            // Notify transfer complete
+            notificationService.notifyTransferComplete(meta.name, 'receive');
 
             chunksRef.current[peerId] = [];
             activeTransfersRef.current[peerId] = null;
@@ -363,6 +401,10 @@ export const useWebRTC = (myUserData) => {
                     ...prev,
                     [peerId]: { ...prev[peerId], status: 'completed', speed: 0 }
                 }));
+
+                // Notify transfer complete
+                notificationService.notifyTransferComplete(file.name, 'send');
+
                 activeTransfersRef.current[peerId] = null;
 
                 // Process next file in queue
@@ -439,6 +481,17 @@ export const useWebRTC = (myUserData) => {
         }
     };
 
+    const updatePeerName = (peerId, name) => {
+        setPeerProfiles(prev => ({
+            ...prev,
+            [peerId]: {
+                ...prev[peerId],
+                name,
+                lastSeen: Date.now()
+            }
+        }));
+    };
+
     return {
         myPeerId,
         connections,
@@ -450,6 +503,9 @@ export const useWebRTC = (myUserData) => {
         resumeTransfer,
         sendChatMessage,
         chatHistory,
-        fileQueue
+        fileQueue,
+        peerProfiles,
+        updatePeerName,
+        notificationService
     };
 };

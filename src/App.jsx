@@ -64,7 +64,10 @@ function App() {
         resumeTransfer,
         sendChatMessage,
         chatHistory,
-        fileQueue
+        fileQueue,
+        peerProfiles,
+        updatePeerName,
+        notificationService
     } = useWebRTC(myUser);
 
     const [showQR, setShowQR] = useState(false);
@@ -85,6 +88,10 @@ function App() {
     const fileInputRef = useRef(null);
     const [selectedPeer, setSelectedPeer] = useState(null);
     const chatEndRef = useRef(null);
+    const [showSettings, setShowSettings] = useState(false);
+    const [editingName, setEditingName] = useState('');
+    const [soundEnabled, setSoundEnabled] = useState(notificationService.soundEnabled);
+    const [notificationsEnabled, setNotificationsEnabled] = useState(notificationService.notificationEnabled);
 
     // Auto-scroll chat
     useEffect(() => {
