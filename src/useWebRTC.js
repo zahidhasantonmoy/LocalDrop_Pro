@@ -110,13 +110,40 @@ export const useWebRTC = (myUserData) => {
     }, [peerProfiles]);
 
     const connectToPeer = (targetPeerId) => {
-        if (!peerRef.current || targetPeerId === myPeerId) return;
-        // Check if already connected
-        if (connections[targetPeerId]) return;
+        if (!peerRef.current) {
+            console.warn('Cannot connect: PeerJS not initialized');
+            return;
+        }
+        if (targetPeerId === myPeerId) {
+            console.warn('Cannot connect to self');
+            return;
+        }
+        if (peerRef.current.destroyed) {
+            console.warn('Cannot connect: Peer destroyed');
+            return;
+        }
 
-        console.log('Connecting to:', targetPeerId);
-        const conn = peerRef.current.connect(targetPeerId);
-        setupConnection(conn);
+        // Check if already connected
+        if (connections[targetPeerId]) {
+            console.log('Already connected to:', targetPeerId);
+            return;
+        }
+
+        console.log('Initiating connection to:', targetPeerId);
+        try {
+            const conn = peerRef.current.connect(targetPeerId, {
+                reliable: true
+            });
+
+            if (!conn) {
+                console.error('PeerJS connect returned null');
+                return;
+            }
+
+            setupConnection(conn);
+        } catch (e) {
+            console.error('Connection failed:', e);
+        }
     };
 
     const setupConnection = (conn) => {

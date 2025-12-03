@@ -101,29 +101,50 @@ function App() {
 
     // QR Scanner Logic
     useEffect(() => {
+        let scanner = null;
         if (showScanner) {
-            const scanner = new Html5QrcodeScanner(
-                "reader",
-                { fps: 10, qrbox: { width: 250, height: 250 } },
-                false
-            );
+            // Wait for animation to finish/element to mount
+            const timer = setTimeout(() => {
+                const element = document.getElementById("reader");
+                if (element) {
+                    try {
+                        scanner = new Html5QrcodeScanner(
+                            "reader",
+                            { fps: 10, qrbox: { width: 250, height: 250 } },
+                            false
+                        );
 
-            scanner.render((decodedText) => {
-                try {
-                    const url = new URL(decodedText);
-                    const peer = url.searchParams.get('peer');
-                    if (peer && peer !== myPeerId) {
-                        connectToPeer(peer);
-                        scanner.clear();
-                        setShowScanner(false);
+                        scanner.render((decodedText) => {
+                            try {
+                                const url = new URL(decodedText);
+                                const peer = url.searchParams.get('peer');
+                                if (peer && peer !== myPeerId) {
+                                    console.log('QR Code detected peer:', peer);
+                                    connectToPeer(peer);
+                                    scanner.clear();
+                                    setShowScanner(false);
+                                }
+                            } catch (e) {
+                                console.error('Invalid QR Code', e);
+                            }
+                        }, (error) => {
+                            // Ignore scan errors
+                        });
+                    } catch (e) {
+                        console.error('Failed to initialize scanner:', e);
                     }
-                } catch (e) {
-                    console.error('Invalid QR Code', e);
                 }
-            }, (error) => { });
+            }, 500);
 
             return () => {
-                scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+                clearTimeout(timer);
+                if (scanner) {
+                    try {
+                        scanner.clear().catch(e => console.warn('Scanner clear error:', e));
+                    } catch (e) {
+                        console.warn('Scanner cleanup error:', e);
+                    }
+                }
             };
         }
     }, [showScanner, myPeerId]);
