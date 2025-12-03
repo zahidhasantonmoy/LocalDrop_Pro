@@ -9,9 +9,12 @@ class NotificationService {
             message: new Audio('/sounds/message.mp3')
         };
 
-        // Set volume
+        // Set volume and add error handlers
         Object.values(this.sounds).forEach(sound => {
             sound.volume = 0.5;
+            sound.onerror = (e) => {
+                console.warn('Sound file failed to load:', e);
+            };
         });
 
         // Check notification permission

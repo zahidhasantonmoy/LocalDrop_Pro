@@ -31,6 +31,7 @@ export const useWebRTC = (myUserData) => {
     const activeTransfersRef = useRef({}); // peerId -> { active: bool, paused: bool, offset: number, file: File (sender only) }
     const lastChunkTimeRef = useRef({}); // peerId -> timestamp
     const queueRef = useRef({}); // peerId -> array of File objects (Ref for immediate access)
+    const peerProfilesRef = useRef(peerProfiles); // Keep current profiles in ref for closures
 
     // Persistence: Save ID
     useEffect(() => {
@@ -104,6 +105,7 @@ export const useWebRTC = (myUserData) => {
 
     // Persist peer profiles
     useEffect(() => {
+        peerProfilesRef.current = peerProfiles; // Keep ref in sync
         localStorage.setItem('localdrop_peer_profiles', JSON.stringify(peerProfiles));
     }, [peerProfiles]);
 
@@ -130,8 +132,12 @@ export const useWebRTC = (myUserData) => {
             });
 
             // Notify connection
-            const peerName = peerProfiles[conn.peer]?.name || `Peer ${conn.peer}`;
-            notificationService.notifyConnection(peerName);
+            try {
+                const peerName = peerProfilesRef.current[conn.peer]?.name || `Peer ${conn.peer}`;
+                notificationService.notifyConnection(peerName);
+            } catch (e) {
+                console.warn('Notification failed:', e);
+            }
         });
 
         conn.on('data', (data) => {
@@ -140,8 +146,12 @@ export const useWebRTC = (myUserData) => {
 
         conn.on('close', () => {
             console.log('Connection closed:', conn.peer);
-            const peerName = peerProfiles[conn.peer]?.name || `Peer ${conn.peer}`;
-            notificationService.notifyDisconnection(peerName);
+            try {
+                const peerName = peerProfilesRef.current[conn.peer]?.name || `Peer ${conn.peer}`;
+                notificationService.notifyDisconnection(peerName);
+            } catch (e) {
+                console.warn('Notification failed:', e);
+            }
 
             setConnections(prev => {
                 const newConns = { ...prev };
@@ -212,8 +222,12 @@ export const useWebRTC = (myUserData) => {
             }));
 
             // Notify new message
-            const peerName = peerProfiles[peerId]?.name || `Peer ${peerId}`;
-            notificationService.notifyMessage(peerName, data.text);
+            try {
+                const peerName = peerProfilesRef.current[peerId]?.name || `Peer ${peerId}`;
+                notificationService.notifyMessage(peerName, data.text);
+            } catch (e) {
+                console.warn('Notification failed:', e);
+            }
             return;
         }
 
