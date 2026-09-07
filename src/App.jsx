@@ -93,6 +93,7 @@ function App() {
     const [editingName, setEditingName] = useState('');
     const [soundEnabled, setSoundEnabled] = useState(notificationService.soundEnabled);
     const [notificationsEnabled, setNotificationsEnabled] = useState(notificationService.notificationEnabled);
+    const [activeFaq, setActiveFaq] = useState(null);
 
     // Auto-scroll chat
     useEffect(() => {
@@ -314,7 +315,14 @@ function App() {
                         <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-4 border-[#1a1a1a]" />
                     </div>
                     <div>
-                        <h1 className={`text-2xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r ${currentTheme.accent}`}>{myUser.name}</h1>
+                        <div className="flex items-center gap-2">
+                            <span className={`text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r ${currentTheme.accent}`}>
+                                {myUser.name}
+                            </span>
+                            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-white/70">
+                                You
+                            </span>
+                        </div>
                         <div className="flex items-center gap-3 mt-1">
                             <span className="text-sm opacity-50 font-mono bg-black/30 px-3 py-1 rounded-lg">ID: {myPeerId}</span>
                             <button
@@ -368,6 +376,29 @@ function App() {
                     </button>
                 </div>
             </header>
+ 
+            {/* Semantic Hero & Brand Bar */}
+            <section className="mb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 px-2">
+                <div>
+                    <h1 className="text-2xl md:text-4xl font-extrabold tracking-tight flex items-center gap-2">
+                        <span>LocalDrop</span>
+                        <span className={`bg-clip-text text-transparent bg-gradient-to-r ${currentTheme.accent}`}>Pro</span>
+                        <span className="text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            P2P Encrypted
+                        </span>
+                    </h1>
+                    <p className="text-sm opacity-70 mt-1 max-w-2xl leading-relaxed">
+                        Fast, serverless peer-to-peer file sharing and real-time messaging. Stream files of any size directly browser-to-browser with WebRTC and AES-GCM encryption.
+                    </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-xs opacity-70 bg-black/20 px-4 py-2 rounded-xl border border-white/5">
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span> Zero Server Uploads</span>
+                    <span>•</span>
+                    <span>No File Size Limit</span>
+                    <span>•</span>
+                    <span>AES-GCM Protected</span>
+                </div>
+            </section>
 
             {/* Main Grid */}
             <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -607,8 +638,144 @@ function App() {
                 currentTheme={currentTheme}
             />
 
+            {/* Architecture, Capabilities & SEO Knowledge Hub */}
+            <section className="mt-16 pt-8 border-t border-white/10">
+                {/* Feature Highlights Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+                    <div className={`${currentTheme.panel} p-6 rounded-2xl border backdrop-blur-md`}>
+                        <div className="text-2xl mb-3">🛡️</div>
+                        <h2 className="text-lg font-bold mb-1">AES-GCM Encryption</h2>
+                        <p className="text-xs opacity-60 leading-relaxed">
+                            WebRTC data channels are secured with DTLS and an AES-GCM layer. Keys stay strictly on your device.
+                        </p>
+                    </div>
+                    <div className={`${currentTheme.panel} p-6 rounded-2xl border backdrop-blur-md`}>
+                        <div className="text-2xl mb-3">⚡</div>
+                        <h2 className="text-lg font-bold mb-1">Zero Server Storage</h2>
+                        <p className="text-xs opacity-60 leading-relaxed">
+                            No cloud buckets, no databases. Files are streamed chunk-by-chunk directly into the recipient's browser.
+                        </p>
+                    </div>
+                    <div className={`${currentTheme.panel} p-6 rounded-2xl border backdrop-blur-md`}>
+                        <div className="text-2xl mb-3">📁</div>
+                        <h2 className="text-lg font-bold mb-1">Folder & ZIP Support</h2>
+                        <p className="text-xs opacity-60 leading-relaxed">
+                            Drag and drop entire folders. LocalDrop Pro bundles and compresses directories client-side before sending.
+                        </p>
+                    </div>
+                    <div className={`${currentTheme.panel} p-6 rounded-2xl border backdrop-blur-md`}>
+                        <div className="text-2xl mb-3">🌐</div>
+                        <h2 className="text-lg font-bold mb-1">Universal Compatibility</h2>
+                        <p className="text-xs opacity-60 leading-relaxed">
+                            Works seamlessly across Windows, macOS, Linux, iOS, and Android without requiring app store downloads.
+                        </p>
+                    </div>
+                </div>
+
+                {/* Architecture Comparison Table */}
+                <div className={`${currentTheme.panel} p-6 md:p-8 rounded-3xl border backdrop-blur-md mb-12 overflow-x-auto`}>
+                    <div className="mb-6">
+                        <h2 className="text-xl font-bold tracking-tight">How LocalDrop Pro Compares</h2>
+                        <p className="text-xs opacity-60 mt-1">Why direct WebRTC peer-to-peer data channels outperform traditional cloud relays.</p>
+                    </div>
+                    <table className="w-full text-left text-xs md:text-sm">
+                        <thead>
+                            <tr className="border-b border-white/10 opacity-70">
+                                <th className="pb-3 font-semibold">Feature / Capability</th>
+                                <th className="pb-3 font-semibold text-blue-400">LocalDrop Pro</th>
+                                <th className="pb-3 font-semibold">Cloud Drives (Google/Dropbox)</th>
+                                <th className="pb-3 font-semibold">Legacy Web Drop Tools</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 opacity-80">
+                            <tr>
+                                <td className="py-3 font-medium">Transfer Method</td>
+                                <td className="py-3 text-blue-400 font-semibold">Direct Browser-to-Browser (P2P)</td>
+                                <td className="py-3">Server Upload &amp; Download</td>
+                                <td className="py-3">WebSocket / Server Relay</td>
+                            </tr>
+                            <tr>
+                                <td className="py-3 font-medium">Server File Retention</td>
+                                <td className="py-3 text-green-400 font-semibold">0 Bytes (Never Touches Server)</td>
+                                <td className="py-3">100% Stored indefinitely</td>
+                                <td className="py-3">Temporary Server Buffer</td>
+                            </tr>
+                            <tr>
+                                <td className="py-3 font-medium">File Size Limit</td>
+                                <td className="py-3 text-blue-400 font-semibold">Unlimited (Streamed in Chunks)</td>
+                                <td className="py-3">Strict Quotas / Paid Plans</td>
+                                <td className="py-3">Often 1GB - 2GB Caps</td>
+                            </tr>
+                            <tr>
+                                <td className="py-3 font-medium">Account / Registration</td>
+                                <td className="py-3 text-green-400 font-semibold">None (Anonymous Peer IDs)</td>
+                                <td className="py-3">Mandatory Sign-In</td>
+                                <td className="py-3">Varies</td>
+                            </tr>
+                            <tr>
+                                <td className="py-3 font-medium">Folder / Directory Transfer</td>
+                                <td className="py-3 text-blue-400 font-semibold">Automated Client-Side ZIP</td>
+                                <td className="py-3">Manual ZIP / Cloud Sync</td>
+                                <td className="py-3">Single Files Only</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* FAQ Accordion Section (Optimized for Humans & Search Engines) */}
+                <div className={`${currentTheme.panel} p-6 md:p-8 rounded-3xl border backdrop-blur-md mb-12`}>
+                    <div className="mb-6">
+                        <h2 className="text-xl font-bold tracking-tight">Frequently Asked Questions</h2>
+                        <p className="text-xs opacity-60 mt-1">Everything you need to know about peer-to-peer security, speed, and privacy.</p>
+                    </div>
+                    <div className="space-y-4">
+                        {[
+                            {
+                                q: "How does LocalDrop Pro transfer files without a server?",
+                                a: "LocalDrop Pro establishes a direct WebRTC (Web Real-Time Communication) peer-to-peer data channel between your devices. A signaling handshake occurs solely to negotiate network paths (STUN/TURN). Once connected, file chunks stream directly from device to device without touching intermediate servers."
+                            },
+                            {
+                                q: "Are my files and chat messages secure?",
+                                a: "Yes. All transfers utilize DTLS encryption built into the WebRTC protocol stack, reinforced with client-side AES-GCM encryption. Your data is not stored, logged, or intercepted by any third party."
+                            },
+                            {
+                                q: "Is there a limit on file size or bandwidth?",
+                                a: "No artificial limits exist. Because LocalDrop Pro streams binary data in managed chunks directly between peer memory buffers, you can transfer gigabytes of high-resolution video, disk images, or datasets limited only by your local device memory and connection speed."
+                            },
+                            {
+                                q: "How do I pair devices using the 6-digit code or QR scanner?",
+                                a: "Open LocalDrop Pro on both devices. On Device A, click 'Show QR' or copy your 6-digit ID. On Device B, scan the QR code using the built-in camera tool or type the 6-digit ID into the connect box. Both devices pair instantly."
+                            },
+                            {
+                                q: "Can I transfer entire folders at once?",
+                                a: "Yes. Drag and drop any directory into an active peer window. LocalDrop Pro uses an integrated client-side JSZip engine to automatically archive the folder structure into a single package before transmitting."
+                            },
+                            {
+                                q: "Is LocalDrop Pro open source and free to use?",
+                                a: "Yes, LocalDrop Pro is 100% free and open-source. It does not require any paid subscription, license key, or account creation."
+                            }
+                        ].map((faq, idx) => (
+                            <div key={idx} className="border border-white/5 rounded-2xl overflow-hidden bg-black/20">
+                                <button
+                                    onClick={() => setActiveFaq(activeFaq === idx ? null : idx)}
+                                    className="w-full text-left p-4 md:p-5 flex justify-between items-center font-medium text-sm md:text-base hover:bg-white/5 transition-colors"
+                                >
+                                    <span>{faq.q}</span>
+                                    <span className="text-xs opacity-50 ml-4 font-mono">{activeFaq === idx ? '▲' : '▼'}</span>
+                                </button>
+                                {activeFaq === idx && (
+                                    <div className="px-4 pb-4 md:px-5 md:pb-5 text-xs md:text-sm opacity-75 leading-relaxed border-t border-white/5 pt-3">
+                                        {faq.a}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
             {/* Footer */}
-            <footer className="mt-12 pt-6 border-t border-white/10">
+            <footer className="mt-8 pt-6 border-t border-white/10">
                 {/* Copyright */}
                 <p className="text-center text-xs opacity-30 mb-4 tracking-wide">
                     © {new Date().getFullYear()} LocalDrop Pro · Peer-to-peer. No servers. No traces.

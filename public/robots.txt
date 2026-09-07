@@ -1,0 +1,24 @@
+# LocalDrop Pro - Robots Configuration
+User-agent: *
+Allow: /
+
+# Dedicated AI and Generative Search Crawlers
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+# Disallow transient state parameters
+Disallow: /*?peer=*
+
+Sitemap: https://localdrop-pro.vercel.app/sitemap.xml

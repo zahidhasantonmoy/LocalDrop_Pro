@@ -3,15 +3,136 @@
 
 <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Primary Meta Tags -->
+    <title>LocalDrop Pro — Fast, Private Peer-to-Peer WebRTC File Transfer</title>
+    <meta name="title" content="LocalDrop Pro — Fast, Private Peer-to-Peer WebRTC File Transfer" />
+    <meta name="description" content="Share files and folders of any size directly between browsers with zero intermediate servers. End-to-end encrypted, instant pairing via 6-digit code or QR." />
+    <meta name="keywords" content="p2p file sharing, webrtc file transfer, snapdrop alternative, airdrop alternative for windows, private file sharing, browser to browser transfer, encrypted file share, localdrop" />
+    <meta name="author" content="Zahid Hasan Tonmoy" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <link rel="canonical" href="https://localdrop-pro.vercel.app/" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://localdrop-pro.vercel.app/" />
+    <meta property="og:title" content="LocalDrop Pro — Fast, Private Peer-to-Peer WebRTC File Transfer" />
+    <meta property="og:description" content="Send unlimited files directly between devices without cloud storage. Fast, private, and serverless WebRTC file transfer." />
+    <meta property="og:image" content="https://localdrop-pro.vercel.app/og-image.png" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://localdrop-pro.vercel.app/" />
+    <meta property="twitter:title" content="LocalDrop Pro — Fast, Private Peer-to-Peer WebRTC File Transfer" />
+    <meta property="twitter:description" content="Send unlimited files directly between devices without cloud storage. Fast, private, and serverless WebRTC file transfer." />
+    <meta property="twitter:image" content="https://localdrop-pro.vercel.app/og-image.png" />
+
+    <!-- Favicon & PWA Theme -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
-    <title>LocalDrop Pro</title>
+    <meta name="theme-color" content="#1a1a2e" />
     <meta name="google-site-verification" content="Q66Qc1pT14J1UbqURZIWDOwyEmlJnwY7IFSCS2RBBT8" />
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://localdrop-pro.vercel.app/#app",
+          "name": "LocalDrop Pro",
+          "operatingSystem": "All (Web Browser, Windows, macOS, Linux, Android, iOS)",
+          "applicationCategory": "UtilitiesApplication",
+          "applicationSubCategory": "File Sharing & Communication",
+          "description": "A high-speed, peer-to-peer (P2P) file sharing and real-time chat application using WebRTC data channels and AES-GCM client-side encryption.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "featureList": [
+            "Direct WebRTC peer-to-peer file transfer",
+            "Zero server storage or cloud retention",
+            "Client-side AES-GCM end-to-end encryption",
+            "Automatic folder archiving using JSZip",
+            "Instant device pairing via 6-digit short ID and QR code",
+            "Integrated peer-to-peer text messaging",
+            "Progressive Web App (PWA) offline installation"
+          ],
+          "author": {
+            "@type": "Person",
+            "name": "Zahid Hasan Tonmoy",
+            "url": "https://zahidhasantonmoy.vercel.app/",
+            "sameAs": [
+              "https://github.com/zahidhasantonmoy",
+              "https://www.linkedin.com/in/zahidhasantonmoy/"
+            ]
+          }
+        },
+        {
+          "@type": "FAQPage",
+          "@id": "https://localdrop-pro.vercel.app/#faq",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How does LocalDrop Pro transfer files without a server?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "LocalDrop Pro uses WebRTC (Web Real-Time Communication) to establish a direct, browser-to-browser data channel between two devices. A signaling server is only used momentarily to exchange connection metadata; the actual files are streamed directly between peers without ever touching or being stored on an intermediate server."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Is there a file size limit on LocalDrop Pro?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "No. LocalDrop Pro does not impose artificial file size limits because data is streamed in chunks directly between peers. You can transfer gigabytes of video, raw images, or archives without cloud upload quotas."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Are transfers end-to-end encrypted?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. WebRTC connections are secured with Datagram Transport Layer Security (DTLS). LocalDrop Pro also features an AES-GCM cryptographic service layer to protect file transfers and chat messages."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Can I transfer entire folders?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. LocalDrop Pro automatically compresses directories into a ZIP archive client-side before transmission, allowing seamless folder transfers with a single drag-and-drop."
+              }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
 </head>
 
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <!-- Static Fallback Content for Search Crawlers and No-JS Environments -->
+        <noscript>
+            <main style="max-width:800px;margin:40px auto;padding:20px;font-family:sans-serif;color:#111;">
+                <h1>LocalDrop Pro — Secure Peer-to-Peer WebRTC File Transfer</h1>
+                <p><strong>Transfer unlimited files and folders directly between devices with zero server storage.</strong></p>
+                <p>LocalDrop Pro utilizes WebRTC technology to establish an encrypted browser-to-browser connection. Please enable JavaScript in your browser to start pairing devices and transferring files.</p>
+                <h2>Key Features</h2>
+                <ul>
+                    <li>Direct Browser-to-Browser Transfer (Zero Server Upload)</li>
+                    <li>End-to-End Security with AES-GCM & DTLS</li>
+                    <li>Instant Pairing via 6-Digit ID or QR Code Scan</li>
+                    <li>Automatic Directory Archiving (Folder ZIP Support)</li>
+                    <li>Integrated Real-Time Encrypted Chat</li>
+                </ul>
+            </main>
+        </noscript>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
 </body>
 
