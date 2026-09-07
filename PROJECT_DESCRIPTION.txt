@@ -1,0 +1,52 @@
+# LocalDrop Pro - Project Description
+
+## Overview
+LocalDrop Pro is a modern, secure, peer-to-peer (P2P) file sharing and real-time chat web application. It allows devices to connect directly via WebRTC to transfer files and messages without intermediate servers (after the initial signaling handshake). The application is built with React and focuses on ease of use, speed, and privacy.
+
+## Key Features
+
+### 1. Peer-to-Peer Connectivity
+*   **Direct Transfer:** Uses WebRTC (via PeerJS) for direct browser-to-browser data transfer.
+*   **Easy Pairing:** Devices connect using a generated 6-digit short ID or by scanning a QR code.
+*   **Auto-Reconnection:** Automatically attempts to reconnect to previously known peers.
+
+### 2. File Transfer
+*   **Universal Support:** Supports sending files of any type and size.
+*   **Directory Support:** Automatically zips directories before sending.
+*   **Drag & Drop:** Intuitive drag-and-drop interface for initiating transfers.
+*   **Queue System:** Manages multiple file transfers sequentially.
+*   **Transfer Controls:** Pause, resume, and cancel capabilities for active transfers.
+*   **Visual Feedback:** Real-time progress bars, speed indicators, and transfer history.
+
+### 3. Communication
+*   **Real-time Chat:** Integrated text messaging system between connected peers.
+
+### 4. User Experience (UI/UX)
+*   **Themes:** Multiple visual themes (Aurora, Cyberpunk, Minimal) to customize the look.
+*   **Responsive Design:** Fully responsive layout suitable for desktop and mobile devices.
+*   **PWA Support:** Configured as a Progressive Web App (PWA) for native-like installation.
+*   **Animations:** Smooth transitions and interactions using Framer Motion.
+
+### 5. Security & Privacy
+*   **End-to-End Encryption:** Contains an `EncryptionService` implementing AES-GCM for secure data handling (foundation layer).
+*   **Local Focus:** Data stays local between peers whenever possible.
+
+## Technical Stack
+
+*   **Frontend Framework:** React 18
+*   **Build Tool:** Vite
+*   **Styling:** Tailwind CSS, PostCSS
+*   **Animations:** Framer Motion
+*   **Networking:** PeerJS (WebRTC)
+*   **Utilities:**
+    *   `jszip`: For directory compression.
+    *   `html5-qrcode` & `qrcode.react`: For QR code scanning and generation.
+*   **Language:** JavaScript (ES6+)
+
+## Project Structure
+
+*   **src/App.jsx:** Main entry point handling the UI layout, theme switching, and integration of the WebRTC hook.
+*   **src/useWebRTC.js:** Core logic hook managing PeerJS connections, data channels, file chunking, and transfer state.
+*   **src/EncryptionService.js:** Service class for handling AES-GCM encryption/decryption.
+*   **src/NotificationService.js:** Manages browser notifications and sound alerts for events like incoming connections or messages.
+*   **src/components/**: Reusable UI components (e.g., `SettingsModal`).
